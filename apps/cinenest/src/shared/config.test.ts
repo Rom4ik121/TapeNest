@@ -4,9 +4,10 @@ import { mockDomainOf, parseMockDomains } from './config';
 describe('VITE_USE_MOCKS per domain', () => {
   const p = (v: string | undefined, dev = true) => [...parseMockDomains(v, dev)].sort();
 
-  it('dev default mocks only cinema (real auth); prod default mocks nothing', () => {
-    expect(p(undefined)).toEqual(['cinema']);
+  it('dev and prod default to the real cinema API; cinema is an explicit mock', () => {
+    expect(p(undefined)).toEqual([]);
     expect(p('', false)).toEqual([]);
+    expect(p('cinema')).toEqual(['cinema']);
   });
 
   it('accepts all/none aliases and explicit lists', () => {

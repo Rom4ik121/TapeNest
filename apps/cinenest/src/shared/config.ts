@@ -2,19 +2,19 @@
  * Build-time configuration (Vite env).
  *
  * VITE_USE_MOCKS is per API domain (dev only, MSW):
- *   "cinema" (dev default) — auth goes to the real api-gateway, /cinema/* is mocked
- *                            until streaming-service exists (stage 4; the gateway answers 501);
- *   "true" | "all"         — everything mocked (fully offline frontend work);
- *   "false" | "none"       — no mocks (production);
- *   "auth,cinema"          — explicit comma list.
+ *   "" (dev default, stage 4) — auth and /cinema/* go to the real gateway → streaming-service;
+ *   "cinema"                   — keep the fictional MSW catalog (offline UI work);
+ *   "true" | "all"             — everything mocked;
+ *   "false" | "none"           — no mocks (also the production default);
+ *   "auth,cinema"              — explicit comma list.
  * Unset in a production build → no mocks.
  */
 export type MockDomain = 'auth' | 'cinema';
 const ALL: readonly MockDomain[] = ['auth', 'cinema'];
 
-export function parseMockDomains(raw: string | undefined, isDev = true): ReadonlySet<MockDomain> {
+export function parseMockDomains(raw: string | undefined, _isDev = true): ReadonlySet<MockDomain> {
   const v = (raw ?? '').trim().toLowerCase();
-  if (v === '') return new Set<MockDomain>(isDev ? ['cinema'] : []);
+  if (v === '') return new Set<MockDomain>();
   if (v === 'true' || v === 'all' || v === '1') return new Set(ALL);
   if (v === 'false' || v === 'none' || v === '0') return new Set();
   const out = new Set<MockDomain>();

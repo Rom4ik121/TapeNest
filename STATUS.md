@@ -4,14 +4,15 @@
 > Каждый сеанс: начал с чтения этого файла → работал → обновил этот файл.
 > Легенда: `[ ]` не начато · `[~]` в работе · `[x]` завершено
 
-_Последнее обновление: 2026-10-02 (YouTube Music — основной каталог, ADR 0012)_
+_Последнее обновление: 2026-10-02 (CineNest streaming-service, ADR 0013)_
 
 ## Текущее состояние
 
-- **Этап:** 3. Поиск и воспроизведение идут в YouTube Music (ADR 0012); торренты
-  (ADR 0011) остаются запасным путём, только если YouTube Music ничего не нашёл.
-  Этап 2 — кроме Playwright-sidecar для куки. Следующий продуктовый — этап 4
-  (CineNest, streaming-service). Индексеры в Prowlarr оператор добавляет сам.
+- **Этап:** 4. CineNest читает streaming-service (ADR 0013): вымышленный каталог в Postgres,
+  позиции, «смотреть позже», HLS-превью (сгенерированный тест, не фильм). TorrServer
+  вызывается только если у файла уже есть magnet и `CONTENT_SOURCES` включает p2p.
+  Музыка по-прежнему YouTube Music (ADR 0012), торренты — запасной путь (ADR 0011).
+  Индексеры в Prowlarr оператор добавляет сам.
 - **Готовые артефакты:**
   - `services/api-gateway`: initData → JWT, refresh с ротацией, Redis rate limit, прокси-каркас.
     OpenAPI: `docs/api/gateway.openapi.yaml`.
@@ -33,11 +34,12 @@ _Последнее обновление: 2026-10-02 (YouTube Music — осно
     эвристика). OpenAPI: `docs/api/reco.openapi.yaml`; офлайн-оценка — `docs/reco/`.
   - `apps/waveplayer`: реальные gateway и music-service (dev по умолчанию без моков;
     `VITE_USE_MOCKS=music|all` оставлены).
-  - `apps/cinenest`: авторизация через реальный gateway; `/cinema/*` на моках до этапа 4;
-    отдаётся по пути `/cinenest/`.
+  - `apps/cinenest`: авторизация и `/cinema/*` через реальный gateway → streaming-service;
+    моки только при `VITE_USE_MOCKS=cinema`. Отдаётся по пути `/cinenest/`.
+  - `services/streaming-service`: API :8094 + воркер :8095. OpenAPI `docs/api/cinema.openapi.yaml` 0.2.0.
   - Контракт WavePlayer: `docs/api/waveplayer-contract.md` + `waveplayer.openapi.yaml`.
   - Контракт CineNest: `docs/api/cinema.openapi.yaml`.
-- **Последний ADR:** 0010 (`docs/adr/`).
+- **Последний ADR:** 0013 (`docs/adr/`).
 - **Dev-запуск:** `make miniapp-up` / `make miniapp-down` / `make stack-status`.
   - Процессы: PG/Redis/MinIO/Navidrome :4533 (нативно), gateway :8080, bot-service :8081,
     download-service :8082, download-worker (health :8083), music-service :8084,
@@ -224,12 +226,12 @@ _Последнее обновление: 2026-10-02 (YouTube Music — осно
   аудио играет, ошибок в консоли нет — `/workspace/shots/v4-*.png`
 
 ### Этап 4. CineNest (streaming-service)
-- [ ] TorrServer в compose + Go-клиент REST API
-- [ ] HLS-прокси с переписыванием m3u8 + прокси сегментов
-- [ ] Каталог/карточки/поиск/позиции просмотра
-- [~] Фронтенд CineNest (hls.js, индикатор прогрева, продолжение просмотра) — UI готов на моках
-  (этап 1); осталось переключить `/cinema/*` на streaming-service и отключить моки
-- [ ] Поиск раздач (SourceProvider) + админ-CLI
+- [x] TorrServer в compose + Go-клиент REST API (вызывается только при непустом magnet и `CONTENT_SOURCES=p2p`; сид магнитов не содержит)
+- [x] HLS-прокси с переписыванием m3u8 + прокси сегментов (локальное сгенерированное превью, не фильм)
+- [x] Каталог/карточки/поиск/позиции просмотра (вымышленные названия как строки `streaming.titles`)
+- [x] Фронтенд CineNest на streaming-service; моки `/cinema/*` выключены по умолчанию (`VITE_USE_MOCKS=cinema` оставляет MSW)
+- [x] SourceProvider (`licensed` / `p2p`, поиск раздач в сеть не ходит) + админ-CLI и `POST /cinema/admin/titles` с аудит-логом
+- [ ] Ключ внешнего каталога не нужен: спека TMDB не называет. Не хватает только легального видеопотока вместо тест-картинки, если оператор захочет лицензионный файл.
 
 ### Этап 5. Готовность к запуску
 - [ ] Мониторинг + алерты (Grafana)
@@ -398,3 +400,9 @@ _Последнее обновление: 2026-10-02 (YouTube Music — осно
     вернул `remote=true` («Variatio 1. a 1 Clav.»), лайк 204, `stream-url` 200, аудио 206
     `video/mp4` (65 КиБ, файл на диск не сохранялся). UI не менялся.
 
+- 2026-10-02 — Этап 4 (streaming-service, ADR 0013):
+  - `services/streaming-service` (:8094 API, :8095 worker): схема `streaming`, сид вымышленного каталога CineNest, pg_trgm, watchlist, позиции, continue, сессии.
+  - Воспроизведение без magnet — короткое HLS-превью (testsrc, файл фильма не скачивается и не хранится). Плейлист переписывается на `/hls/…` с HMAC.
+  - TorrServer-клиент есть; 503 `X-Degraded-Dependency: torrserver`, каталог при этом жив. Сид без magnet.
+  - CineNest больше не ставит бейдж «Каталог: демо-данные», пока не задан `VITE_USE_MOCKS=cinema`.
+  - Отладочный лог `initdata rejected` в api-gateway убран.

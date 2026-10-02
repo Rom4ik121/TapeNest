@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
   title: TapeNest CineNest API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Contract between apps/cinenest and api-gateway → streaming-service (stage 4).
-    Until streaming-service is deployed the gateway answers `501 NOT_IMPLEMENTED`
-    (service `streaming`) for every `/cinema/*` path; the frontend uses MSW mocks for the
-    `cinema` domain in dev (`VITE_USE_MOCKS`). Auth (`/auth/*`, `/me`) — see gateway.openapi.yaml.
+    An empty `STREAMING_SERVICE_URL` still makes the gateway answer `501 NOT_IMPLEMENTED`
+    (service `streaming`). Dev no longer mocks `/cinema/*` unless `VITE_USE_MOCKS=cinema`.
+    The seeded catalog is fictional metadata. Playback without a magnet is a generated HLS
+    preview under `/hls/{sessionId}/` (HMAC `exp` + `sig` query). Auth — see gateway.openapi.yaml.
 
     Conventions: UUID ids, cursor pagination (`cursor` + `limit` → `nextCursor`, null at the end),
     errors `{message, code, service?}`. HLS playlists are served by streaming-service under

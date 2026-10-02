@@ -145,6 +145,12 @@ export function initTelegram(): TelegramContext {
   } catch {
     // launch params unreadable — keep defaults
   }
+  // A cached SDK value can be an older launch. The URL is what we opened.
+  const fromUrl = readRawInitDataFallback();
+  if (fromUrl) {
+    initDataRaw = fromUrl;
+    user = userFromRaw(fromUrl);
+  }
 
   try {
     initSDK();

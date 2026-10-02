@@ -14,3 +14,6 @@ Only decisions **not** fixed in `AI_DEVELOPMENT_INSTRUCTION.md` §3.1 (spec §13
 | [0008](0008-downloads-storage-delivery.md) | Downloads: MinIO + presigned `/media` links, ≤720p profile fitting 50 MB, bot upload vs link, `download:events` stream, quotas, retries/proxies, cookies stand-in | Accepted |
 | [0009](0009-music-service-streaming-catalog-wave.md) | music-service: signed stream proxy via gateway `/api/v1/stream/*`, Navidrome catalog sync, degraded 503 vs breaker, play_events batcher + partitions, wave heuristic, no stage-2 audio import | Accepted |
 | [0010](0010-reco-service-my-wave.md) | reco-service for My Wave: Go service + worker, taste profile with decay, co-occurrence + implicit ALS, pure-Go audio features (no essentia/librosa sidecar), MMR/Thompson ranking with reasons, timeout + breaker + heuristic fallback, synthetic offline evaluation | Accepted |
+| [0011](0011-acquisition-service.md) | acquisition-service: invisible legal acquisition behind WavePlayer search | Accepted |
+| [0012](0012-youtube-music-primary.md) | YouTube Music is the primary catalog; torrents are the fallback | Accepted |
+| [0013](0013-cinenest-streaming-service.md) | CineNest streaming-service: fictional catalog, generated HLS preview, TorrServer only when a magnet is already stored | Accepted |

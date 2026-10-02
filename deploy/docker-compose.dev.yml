@@ -109,11 +109,13 @@ services:
       TRUST_PROXY_HEADERS: "true"
       DOWNLOAD_SERVICE_URL: http://download-service:8082
       MUSIC_SERVICE_URL: http://music-service:8084
+      STREAMING_SERVICE_URL: http://streaming-service:8094
     ports:
       - "127.0.0.1:${API_GATEWAY_PORT:-8080}:8080"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      streaming-service: { condition: service_started }
 
   bot-service:
     <<: *restart
@@ -326,6 +328,41 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+
+  # ── stage 4: cinema (API + worker; HLS preview is generated, no film files) ─
+  streaming-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/streaming-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment: &streaming-env
+      STREAMING_SERVICE_PORT: "8094"
+      STREAMING_WORKER_PORT: "8095"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      TORRSERVER_URL: http://torrserver:8090
+      MIGRATE_ON_START: "true"
+    ports:
+      - "127.0.0.1:${STREAMING_SERVICE_PORT:-8094}:8094"
+    depends_on:
+      postgres: { condition: service_healthy }
+      torrserver: { condition: service_started }
+
+  streaming-worker:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/streaming-service
+    entrypoint: []
+    command: ["streaming-worker"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      <<: *streaming-env
+      MIGRATE_ON_START: "false"
+    depends_on:
+      streaming-service: { condition: service_started }
 
   # ── edge (profile): /api → api-gateway, /hls → streaming, / → Vite ──────
   nginx:

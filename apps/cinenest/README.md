@@ -2,8 +2,8 @@
 
 Skeleton from stage 1 (2026-09-25). It uses the same stack and conventions as
 [WavePlayer](../waveplayer/README.md). Auth is real, through api-gateway.
-The cinema domain runs on MSW mocks until streaming-service arrives in stage 4
-(until then the gateway answers `501` for `/api/v1/cinema/*`).
+The cinema domain talks to streaming-service through the gateway (stage 4).
+Set `VITE_USE_MOCKS=cinema` to keep the MSW catalog for offline UI work.
 
 **Stack:** React 18.3 · TypeScript 5.6 (strict) · Vite 5 · TanStack Query 5 · Zustand 4 ·
 Tailwind 3 (the same palette and gradients as WavePlayer, light and dark) ·
@@ -13,7 +13,7 @@ Tailwind 3 (the same palette and gradients as WavePlayer, light and dark) ·
 
 ```bash
 cd apps/cinenest
-cp .env.example .env     # VITE_USE_MOCKS empty = "cinema": real gateway auth, mocked /cinema/*
+cp .env.example .env     # VITE_USE_MOCKS empty = real gateway auth and real /cinema/*
 npm ci
 npm run dev              # http://localhost:5174/cinenest/ — /api is proxied to api-gateway (:8080)
 npm run lint && npm run typecheck && npm test && npm run build
@@ -29,9 +29,9 @@ From the repo root:
 
 | Value | auth (`/auth/*`, `/me`) | cinema (`/cinema/*`) |
 |---|---|---|
-| empty / `cinema` (dev default) | real api-gateway | MSW |
+| empty (dev default) / `none` / `false` | real api-gateway | streaming-service |
+| `cinema` | real api-gateway | MSW |
 | `all` / `true` | MSW (guest login in a plain browser) | MSW |
-| `none` / `false` (production default) | real | real |
 
 The mock catalog has 28 fictional titles (movies and 2-season series) with generated SVG posters.
 

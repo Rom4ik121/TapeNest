@@ -42,6 +42,8 @@ export default defineConfig(({ mode }) => {
   // tunnel WavePlayer's Vite (:5173) forwards /cinenest → here and /api → gateway.
   const proxy = {
     '/api': { target: env.GATEWAY_URL || 'http://127.0.0.1:8080', changeOrigin: false, xfwd: true },
+    // Signed HLS playlists (spec §5.5) are served by streaming-service, not the gateway.
+    '/hls': { target: env.STREAMING_URL || 'http://127.0.0.1:8094', changeOrigin: false },
   };
   return {
     base: BASE,

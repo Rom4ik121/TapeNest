@@ -195,3 +195,18 @@ start_watch() {
   spawn url-watch "$ROOT/tools/dev/url-watch.sh"
   echo "url-watch up (pid $(pid_of url-watch))"
 }
+
+# streaming-service API :8094 + worker (health :8095). Cinema catalog is local;
+# /hls is proxied by Vite/nginx straight here (signed playlists).
+start_streaming() {
+  stop_proc streaming-worker
+  stop_proc streaming-service
+  build_go streaming-service server streaming-service
+  build_go streaming-service worker streaming-worker
+  CINEMA_PREVIEW_DIR="${CINEMA_PREVIEW_DIR:-$ROOT/apps/cinenest/dev-assets/mock-hls}" \
+    spawn streaming-service "$BIN_DIR/streaming-service"
+  wait_http "http://127.0.0.1:${STREAMING_SERVICE_PORT:-8094}/readyz" 40 || { echo "streaming-service not ready, see $LOG_DIR/streaming-service.log" >&2; return 1; }
+  MIGRATE_ON_START=false spawn streaming-worker "$BIN_DIR/streaming-worker"
+  wait_http "http://127.0.0.1:${STREAMING_WORKER_PORT:-8095}/healthz" 20 || { echo "streaming-worker not ready, see $LOG_DIR/streaming-worker.log" >&2; return 1; }
+  echo "streaming-service up (pid $(pid_of streaming-service)), worker pid $(pid_of streaming-worker)"
+}
