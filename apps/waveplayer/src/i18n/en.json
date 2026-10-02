@@ -1,0 +1,174 @@
+{
+  "app": {
+    "name": "WavePlayer",
+    "tagline": "TapeNest music"
+  },
+  "auth": {
+    "loading": "Loading your music…",
+    "failedTitle": "Sign-in failed",
+    "failed": "We couldn't verify your Telegram session. Reopen the app from the bot and try again.",
+    "openInTelegram": "WavePlayer works inside Telegram. Open it from the TapeNest bot.",
+    "retry": "Retry",
+    "unavailable": "Can't reach the TapeNest server. Check your connection and try again.",
+    "openBot": "Open @{{bot}}",
+    "devHint": "Dev: append a signed #tgWebAppData=… hash from tools/initdata-mock."
+  },
+  "nav": {
+    "home": "Home",
+    "wave": "Wave",
+    "search": "Search",
+    "library": "Library"
+  },
+  "home": {
+    "greeting": {
+      "morning": "Good morning, {{name}}",
+      "day": "Good afternoon, {{name}}",
+      "evening": "Good evening, {{name}}",
+      "night": "Good night, {{name}}"
+    },
+    "subtitle": "What are we listening to today?",
+    "waveTitle": "My Wave",
+    "waveSubtitle": "An endless stream tuned to your taste",
+    "waveCta": "Listen",
+    "recent": "Recently played",
+    "popular": "Popular",
+    "liked": "Liked",
+    "demo": "Catalog: demo data"
+  },
+  "wave": {
+    "title": "My Wave",
+    "subtitle": "Adapts to your likes and skips",
+    "start": "Start the wave",
+    "resume": "Resume",
+    "fallback": "Recommendations are unavailable — playing popular tracks",
+    "upNext": "Up next in the wave",
+    "hint": "Like — more of this. Skip — less of this.",
+    "modes": {
+      "label": "Wave mood",
+      "default": "For you",
+      "calm": "Calm",
+      "energetic": "Upbeat",
+      "discover": "Unfamiliar",
+      "favorites": "Favorites"
+    },
+    "reason": {
+      "because_you_liked": "Because you liked “{{title}}”",
+      "artist_you_like": "You listen to {{artist}}",
+      "genre_you_like": "Your genre: {{genre}}",
+      "mood_you_like": "Your mood: {{tag}}",
+      "similar_listeners": "Liked by similar listeners",
+      "popular": "Popular on TapeNest",
+      "new_in_catalog": "New in the catalog",
+      "discovery": "A discovery for you",
+      "favorite": "From your favorites",
+      "session_artist": "More {{artist}} — you liked it"
+    },
+    "tags": {
+      "energetic": "energetic",
+      "calm": "calm",
+      "fast": "fast",
+      "slow": "slow",
+      "bright": "bright",
+      "warm": "warm",
+      "major": "bright-toned",
+      "minor": "minor-key"
+    }
+  },
+  "search": {
+    "title": "Search",
+    "placeholder": "Track, artist or album",
+    "prompt": "Start typing to search",
+    "noResults": "Nothing found for “{{q}}”",
+    "clear": "Clear",
+    "tracks": "Tracks",
+    "albums": "Albums",
+    "artists": "Artists",
+    "showAll": "Show all",
+    "showLess": "Show less"
+  },
+  "library": {
+    "title": "Library",
+    "liked": "Liked",
+    "playlists": "Folders",
+    "newPlaylist": "New folder",
+    "namePlaceholder": "Folder name",
+    "create": "Create",
+    "save": "Save",
+    "cancel": "Cancel",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteConfirm": "Delete folder “{{title}}”?",
+    "empty": "No folders yet. Create your first one!",
+    "tracks_one": "{{count}} track",
+    "tracks_other": "{{count}} tracks",
+    "nameLabel": "Folder name",
+    "creating": "Creating…"
+  },
+  "playlist": {
+    "empty": "This folder is empty. Add tracks via the “⋯” menu.",
+    "play": "Play",
+    "shuffle": "Shuffle",
+    "remove": "Remove from folder",
+    "notFound": "Folder not found"
+  },
+  "track": {
+    "more": "More",
+    "addToPlaylist": "Add to folder",
+    "added": "Added to “{{title}}”",
+    "like": "Like",
+    "unlike": "Remove from Liked",
+    "playNext": "Play"
+  },
+  "player": {
+    "play": "Play",
+    "pause": "Pause",
+    "next": "Next",
+    "prev": "Previous",
+    "close": "Collapse player",
+    "open": "Open player",
+    "tapToPlay": "Tap to continue",
+    "loading": "Loading…",
+    "streamError": "Streaming is temporarily unavailable",
+    "nowPlaying": "Now playing",
+    "fromWave": "My Wave",
+    "fromQueue": "Queue",
+    "seek": "Seek",
+    "resume": "Resume from {{time}}",
+    "noSources": "This track is unavailable right now",
+    "quota": "Too many new tracks today — try again later",
+    "notAvailable": "Track unavailable",
+    "acquireTimeout": "This track is taking longer than usual — try again shortly"
+  },
+  "list": {
+    "end": "That's all",
+    "empty": "Nothing here yet",
+    "loadingMore": "Loading more…"
+  },
+  "error": {
+    "title": "Something went wrong",
+    "unavailable": "This section is temporarily unavailable. Everything else works.",
+    "network": "No connection to the server",
+    "retry": "Retry",
+    "notDeployed": "This section is coming soon.",
+    "generic": "Please try again in a moment.",
+    "retrying": "Retrying…"
+  },
+  "a11y": {
+    "skeleton": "Loading",
+    "closeSheet": "Close"
+  },
+  "album": {
+    "notFound": "Album not found",
+    "play": "Play",
+    "shuffle": "Shuffle",
+    "tracks": "Tracks",
+    "empty": "Tracklist is not available yet"
+  },
+  "artist": {
+    "notFound": "Artist not found",
+    "popular": "Popular tracks",
+    "albums": "Albums",
+    "play": "Play",
+    "empty": "Nothing here yet"
+  }
+}

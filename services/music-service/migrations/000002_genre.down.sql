@@ -1,0 +1,2 @@
+ALTER TABLE music.tracks DROP COLUMN IF EXISTS year;
+ALTER TABLE music.tracks DROP COLUMN IF EXISTS genre;

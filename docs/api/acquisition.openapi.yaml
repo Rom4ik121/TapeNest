@@ -1,0 +1,206 @@
+openapi: 3.1.0
+info:
+  title: TapeNest acquisition-service (internal)
+  version: 0.1.0
+  description: |
+    Invisible music acquisition (ADR 0011). **Internal only**: music-service calls it with
+    `X-Internal-Token`. It is not exposed through api-gateway.
+
+    Search hits MusicBrainz. `POST /internal/v1/acquisitions` is idempotent: a play or like of
+    a release group that is not on disk yet queues one shared album download. The wanted file
+    is fetched first; `GET /recordings/{id}/status` reports when enough bytes are buffered to
+    start, and `GET /recordings/{id}/stream` serves the partial file (HTTP Range) until the
+    library copy exists.
+
+    Indexers are **not** configured by this service. The operator adds them in Prowlarr.
+    The only indexer TapeNest tooling registers is the local CC0 Torznab stub
+    (`tools/legal-indexer`, `acqctl add-test-indexer`).
+servers:
+  - url: http://acquisition-service:8088
+    description: internal (compose); dev http://127.0.0.1:8088
+security:
+  - internal: []
+tags:
+  - name: catalog
+  - name: acquire
+  - name: admin
+  - name: ops
+paths:
+  /healthz:
+    get:
+      tags: [ops]
+      security: []
+      summary: Liveness
+      responses:
+        "200": { description: ok }
+  /readyz:
+    get:
+      tags: [ops]
+      security: []
+      summary: Readiness (postgres and redis required; arr apps reported but optional)
+      responses:
+        "200": { description: required dependencies up }
+        "503": { description: postgres or redis down }
+  /internal/v1/search:
+    get:
+      tags: [catalog]
+      summary: MusicBrainz artists, release groups and recordings
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string, maxLength: 200 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 25, default: 10 }
+      responses:
+        "200":
+          description: partial=true when one facet failed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artists, albums, recordings, partial]
+                properties:
+                  artists: { type: array, items: { type: object } }
+                  albums: { type: array, items: { type: object } }
+                  recordings: { type: array, items: { type: object } }
+                  partial: { type: boolean }
+        "502": { description: all three MusicBrainz queries failed }
+  /internal/v1/albums/{rg}:
+    get:
+      tags: [catalog]
+      summary: Release-group tracklist
+      parameters:
+        - in: path
+          name: rg
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: album }
+        "404": { description: unknown release group }
+  /internal/v1/artists/{id}:
+    get:
+      tags: [catalog]
+      summary: Artist and official albums/EPs
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: artist }
+        "404": { description: unknown artist }
+  /internal/v1/acquisitions:
+    post:
+      tags: [acquire]
+      summary: Ensure an album is being acquired (play, like or playlist)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, releaseGroupMbid, reason]
+              properties:
+                userId: { type: string, format: uuid }
+                releaseGroupMbid: { type: string, format: uuid }
+                recordingMbid: { type: string, format: uuid }
+                title: { type: string, maxLength: 300 }
+                reason: { type: string, enum: [play, like, playlist] }
+      responses:
+        "200":
+          description: current status; stream.ready means playback can start
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requestId, state, progress]
+                properties:
+                  requestId: { type: string, format: uuid }
+                  state: { type: string, enum: [queued, searching, downloading, importing, available, failed] }
+                  progress: { type: number }
+                  errorCode: { type: string }
+                  stream:
+                    type: object
+                    properties:
+                      ready: { type: boolean }
+                      imported: { type: boolean }
+                      bufferedBytes: { type: integer }
+                      sizeBytes: { type: integer }
+        "400": { description: invalid body }
+        "429": { description: per-user quota }
+        "503": { description: CONTENT_SOURCES is not p2p }
+        "507": { description: library disk cap }
+  /internal/v1/recordings/{id}/status:
+    get:
+      tags: [acquire]
+      summary: Readiness of one recording (no side effects)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: status }
+        "404": { description: recording is not on any request }
+  /internal/v1/recordings/{id}/stream:
+    get:
+      tags: [acquire]
+      summary: Audio bytes (library file, or the in-progress torrent file)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: Range
+          schema: { type: string }
+      responses:
+        "200": { description: full body }
+        "206": { description: range }
+        "416": { description: bad range }
+        "503": { description: not buffered yet }
+    head:
+      tags: [acquire]
+      summary: Headers only
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: headers }
+  /internal/v1/admin/acquisitions:
+    get:
+      tags: [admin]
+      summary: List requests
+      parameters:
+        - in: query
+          name: state
+          schema: { type: string }
+      responses:
+        "200": { description: items }
+  /internal/v1/admin/acquisitions/{id}:
+    get:
+      tags: [admin]
+      summary: One request with tracks and events
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: detail }
+        "404": { description: missing }
+  /internal/v1/admin/status:
+    get:
+      tags: [admin]
+      summary: Arr health, request counts, disk, limits, indexer count
+      responses:
+        "200": { description: status }
+components:
+  securitySchemes:
+    internal:
+      type: apiKey
+      in: header
+      name: X-Internal-Token

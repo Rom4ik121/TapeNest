@@ -1,0 +1,269 @@
+openapi: 3.1.0
+info:
+  title: TapeNest reco-service (internal)
+  version: 0.1.0
+  description: |
+    My Wave recommender (ADR 0010). **Internal only**: called by music-service with
+    `X-Internal-Token`, never exposed through api-gateway.
+
+    * `POST /internal/v1/wave/next` returns the next batch for a wave session. It blends
+      candidates from the long-term taste profile, item-item co-occurrence (CF), implicit ALS
+      ("similar listeners"), audio-content neighbours, popularity, fresh tracks and in-session
+      feedback. Then it re-ranks with MMR diversity, no same artist back-to-back,
+      ε-exploration + Thompson sampling over sources, and a per-mode bonus.
+    * music-service bounds each call with `RECO_TIMEOUT` (default 400 ms) and a circuit
+      breaker (3 consecutive failures → open for 30 s). It then falls back to its local
+      heuristic (ADR 0009 §6), so reco being down never breaks My Wave.
+    * Events: reco-worker consumes the Redis streams `music:play_events` and
+      `music:user_events` (consumer group `reco`, see `x-events`) and backfills the history
+      once from music-service's internal export (`/internal/v1/interactions`, documented
+      below under the music-service server).
+servers:
+  - url: http://reco-service:8086
+    description: internal (compose); dev http://127.0.0.1:8086
+security:
+  - internal: []
+tags:
+  - name: wave
+  - name: debug
+  - name: ops
+  - name: music-export
+    description: music-service internal exports consumed by reco-worker
+paths:
+  /healthz:
+    get: { tags: [ops], security: [], summary: Liveness, responses: { '200': { description: ok } } }
+  /readyz:
+    get:
+      tags: [ops]
+      security: []
+      summary: Readiness (PostgreSQL + a loaded, non-empty model)
+      responses:
+        '200': { description: ready, content: { application/json: { schema: { type: object, properties: { postgres: { type: string }, model: { type: string }, modelVersion: { type: integer }, tracks: { type: integer } } } } } }
+        '503': { description: not ready (db down or model empty — music-service falls back) }
+  /internal/v1/wave/next:
+    post:
+      tags: [wave]
+      summary: Next wave batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string, format: uuid }
+                sessionId: { type: string, format: uuid }
+                mode: { type: string, enum: [default, calm, energetic, discover, favorites], default: default }
+                limit: { type: integer, minimum: 1, maximum: 50, default: 10, description: values above 50 are clamped }
+                exclude: { type: array, items: { type: string, format: uuid }, description: tracks already served in this session (never repeated) }
+                recent: { type: array, items: { type: string, format: uuid }, description: 'last served tracks, oldest first (artist adjacency, session context)' }
+                feedback:
+                  type: array
+                  description: in-session likes/skips, oldest first (short-term profile)
+                  items: { type: object, required: [trackId, action], properties: { trackId: { type: string, format: uuid }, action: { type: string, enum: [like, skip] } } }
+      responses:
+        '200':
+          description: ranked picks (may be empty when every track is excluded — the caller starts a new round)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [modelVersion, tracks]
+                properties:
+                  modelVersion: { type: integer }
+                  tracks: { type: array, items: { $ref: '#/components/schemas/Pick' } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
+        '503': { description: model not loaded yet, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /internal/v1/users/{id}/profile:
+    get:
+      tags: [debug]
+      summary: Taste profile snapshot (decayed to now) — debugging and e2e
+      parameters: [ { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200':
+          description: profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId: { type: string }
+                  tracks: { type: integer, description: tracks with any signal }
+                  plays: { type: integer }
+                  likes: { type: integer }
+                  earlySkips: { type: integer }
+                  hasFactors: { type: boolean, description: user has ALS factors from the last training }
+                  coldStart: { type: boolean }
+                  top:
+                    type: object
+                    description: top-10 weights per kind (artist, genre, tag)
+                    additionalProperties: { type: array, items: { type: object, properties: { key: { type: string }, label: { type: string }, weight: { type: number } } } }
+                  sources:
+                    type: object
+                    description: Thompson-sampling Beta arms per candidate source (successes/failures)
+                    additionalProperties: { type: object, properties: { alpha: { type: number }, beta: { type: number } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /internal/v1/tracks/{id}/similar:
+    get:
+      tags: [debug]
+      summary: Audio features and neighbours of a track (content cosine + CF co-occurrence)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 20, default: 10 } }
+      responses:
+        '200':
+          description: neighbours
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trackId: { type: string }
+                  genre: { type: string }
+                  tempo: { type: number, description: BPM }
+                  energyPct: { type: number, description: energy percentile within the catalog (0..1) }
+                  tags: { type: array, items: { type: string } }
+                  content: { type: array, items: { $ref: '#/components/schemas/Neighbor' } }
+                  cf: { type: array, items: { $ref: '#/components/schemas/Neighbor' } }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /internal/v1/model:
+    get:
+      tags: [debug]
+      summary: Loaded model summary and active ranking weights
+      responses:
+        '200': { description: model info, content: { application/json: { schema: { type: object, properties: { version: { type: integer }, tracks: { type: integer }, withAudioFeatures: { type: integer }, withCF: { type: integer }, withFactors: { type: integer }, genres: { type: object, additionalProperties: { type: integer } }, builtAt: { type: string, format: date-time }, weights: { $ref: '#/components/schemas/Weights' } } } } } }
+        '503': { $ref: '#/components/responses/Error' }
+
+  # ── music-service internal exports (served by music-service, consumed by reco-worker) ──
+  /internal/v1/catalog:
+    servers: [ { url: 'http://music-service:8084', description: music-service (internal) } ]
+    get:
+      tags: [music-export]
+      summary: Catalog copy (keyset pages by id, active tracks only)
+      parameters:
+        - { name: after, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 500 } }
+      responses:
+        '200':
+          description: page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next]
+                properties:
+                  next: { type: [string, 'null'], description: cursor for the next page }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        title: { type: string }
+                        artistId: { type: string, format: uuid }
+                        artist: { type: string }
+                        albumId: { type: [string, 'null'] }
+                        album: { type: string }
+                        genre: { type: string }
+                        year: { type: [integer, 'null'] }
+                        durationSec: { type: integer }
+                        popularity: { type: number, description: raw music.track_popularity score }
+                        createdAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/Error' }
+  /internal/v1/interactions:
+    servers: [ { url: 'http://music-service:8084', description: music-service (internal) } ]
+    get:
+      tags: [music-export]
+      summary: 'One-off history backfill (NDJSON: likes, playlist adds, play events of the last N days)'
+      parameters: [ { name: days, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 365, default: 90 } } ]
+      responses:
+        '200':
+          description: one JSON object per line; a failed export cuts the stream (the worker retries on the next start)
+          content:
+            application/x-ndjson:
+              schema:
+                type: object
+                properties:
+                  kind: { type: string, enum: [like, playlist_add, play] }
+                  userId: { type: string, format: uuid }
+                  trackId: { type: string, format: uuid }
+                  at: { type: string, format: date-time }
+                  positionSec: { type: number }
+                  completed: { type: boolean }
+                  eventId: { type: string, description: 'play events: Redis stream entry id (dedupe with live events)' }
+  /internal/v1/tracks/{id}/audio:
+    servers: [ { url: 'http://music-service:8084', description: music-service (internal) } ]
+    get:
+      tags: [music-export]
+      summary: Original audio for analysis (proxied from Navidrome, Range supported)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: audio bytes, content: { audio/*: { schema: { type: string, format: binary } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { description: Navidrome down }
+components:
+  securitySchemes:
+    internal: { type: apiKey, in: header, name: X-Internal-Token }
+  responses:
+    Error: { description: error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  schemas:
+    Error: { type: object, required: [message], properties: { message: { type: string }, code: { type: string } } }
+    Pick:
+      type: object
+      required: [trackId, score, source]
+      properties:
+        trackId: { type: string, format: uuid }
+        score: { type: number }
+        source: { type: string, enum: [profile, cf, als, content, popular, fresh, session, explore], description: dominant candidate source (Thompson arm) }
+        reason: { $ref: '#/components/schemas/Reason' }
+    Reason:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [because_you_liked, artist_you_like, genre_you_like, mood_you_like, similar_listeners, popular, new_in_catalog, discovery, favorite, session_artist] }
+        refTrackId: { type: string }
+        refTitle: { type: string }
+        refArtist: { type: string }
+        artist: { type: string }
+        genre: { type: string }
+        tag: { type: string }
+    Neighbor: { type: object, properties: { trackId: { type: string }, title: { type: string }, artist: { type: string }, sim: { type: number } } }
+    Weights:
+      type: object
+      description: ranking weights (defaults tuned offline; override with RECO_WEIGHTS JSON)
+      properties:
+        profile: { type: number }
+        cf: { type: number }
+        als: { type: number }
+        content: { type: number }
+        popular: { type: number }
+        fresh: { type: number }
+        session: { type: number }
+        novelty: { type: number }
+        mode: { type: number }
+        epsilon: { type: number }
+        mmrLambda: { type: number }
+        maxPerArtist: { type: integer }
+        jitter: { type: number }
+        freshDays: { type: number }
+        thompson: { type: boolean }
+        poolSize: { type: integer }
+        coldContent: { type: number }
+x-events:
+  music:play_events:
+    producer: music-service (POST /events/track-listened)
+    fields: { u: user uuid, t: track uuid, p: position sec, c: '1 = completed' }
+  music:user_events:
+    producer: music-service
+    fields:
+      k: 'like | unlike | playlist_add | playlist_remove | wave_like | wave_skip | skip'
+      u: user uuid
+      t: track uuid
+      s: wave session uuid (wave events)
+      src: candidate source that served the track (wave events → Thompson arms)
+      p: position sec (skip)

@@ -1,0 +1,207 @@
+openapi: 3.1.0
+info:
+  title: TapeNest api-gateway
+  version: 1.2.0
+  description: |
+    Public edge of TapeNest (stage 1): Telegram auth (initData → JWT), rate limiting,
+    routing to internal services. Music/playlist/wave endpoints are specified in
+    waveplayer.openapi.yaml and proxied unchanged to music-service (stage 3,
+    MUSIC_SERVICE_URL). Signed media links `/api/v1/stream/*` (GET/HEAD) are proxied
+    **without** a JWT: music-service verifies the HMAC signature (ADR 0009).
+
+    * Errors: `{ message, code, service? }` (see ErrorCode).
+    * Upstream not deployed in this environment → **501 NOT_IMPLEMENTED** with `service`
+      (e.g. download without DOWNLOAD_SERVICE_URL). Upstream deployed but failing / breaker open →
+      **503 SERVICE_UNAVAILABLE** with `service` and `Retry-After` (spec §5.2, §8).
+      An upstream 503 carrying `X-Degraded-Dependency` (e.g. music-service while Navidrome is
+      down) is passed through and does not count against the breaker.
+    * Rate limits (token bucket, Redis): `/auth/*` per client IP, the rest per user.
+      429 carries `Retry-After`; every limited response has `X-RateLimit-Remaining`.
+    * Every response carries `X-Request-Id` (inbound id accepted if it matches `[A-Za-z0-9._-]{8,64}`).
+    * Proxied requests get `X-User-Id`, `X-Telegram-Id`, `X-User-Role`, `X-Request-Id`;
+      `Authorization` and `Cookie` are stripped.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearer: []
+paths:
+  /healthz:
+    get:
+      security: []
+      summary: Liveness
+      responses: { '200': { description: alive } }
+  /readyz:
+    get:
+      security: []
+      summary: Readiness (PostgreSQL + Redis)
+      responses:
+        '200': { description: ready, content: { application/json: { schema: { $ref: '#/components/schemas/Ready' } } } }
+        '503': { description: degraded, content: { application/json: { schema: { $ref: '#/components/schemas/Ready' } } } }
+  /api/v1/auth/telegram:
+    post:
+      security: []
+      summary: Exchange Telegram initData for a JWT pair (opens a new session)
+      description: |
+        initData is validated per Telegram (HMAC-SHA256 with key HMAC("WebAppData", bot_token)),
+        auth_date must be ≤ INITDATA_TTL (24 h) old and not in the future (60 s skew).
+        The user is upserted by telegram_id; id is a stable UUID v4.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [initData], properties: { initData: { type: string, maxLength: 8192 } } } } }
+      responses:
+        '200': { description: JWT pair, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'INVALID_INIT_DATA | INIT_DATA_EXPIRED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/auth/refresh:
+    post:
+      security: []
+      summary: Rotate the refresh token (one-time use)
+      description: |
+        The presented refresh token is invalidated and a new pair is returned in the same
+        session. Presenting an already-rotated token revokes the whole session
+        (REFRESH_REUSED) including its access tokens.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefreshBody' } } }
+      responses:
+        '200': { description: new JWT pair, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokens' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { description: 'REFRESH_INVALID | REFRESH_REUSED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/auth/logout:
+    post:
+      security: []
+      summary: Revoke the session of a refresh token (idempotent)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefreshBody' } } }
+      responses:
+        '204': { description: revoked (or unknown token) }
+        '400': { $ref: '#/components/responses/Error' }
+  /api/v1/me:
+    get:
+      summary: Current user
+      responses:
+        '200': { description: user, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { description: 'UNAUTHORIZED | TOKEN_EXPIRED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/tracks/{rest}:
+    parameters: [ { name: rest, in: path, required: true, schema: { type: string } } ]
+    get:
+      summary: Proxied to music-service (see waveplayer.openapi.yaml; same for /playlists*, /wave/*, /events/*)
+      responses:
+        '200': { description: upstream response }
+        '501': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /api/v1/stream/{rest}:
+    parameters: [ { name: rest, in: path, required: true, schema: { type: string } } ]
+    get:
+      security: []
+      summary: Signed audio/cover links → music-service (no JWT, no per-user rate limit; see waveplayer.openapi.yaml /stream/*)
+      responses:
+        '200': { description: media }
+        '206': { description: partial content (Range) }
+        '403': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    head:
+      security: []
+      summary: Same as GET, headers only
+      responses:
+        '200': { description: headers }
+  /api/v1/downloads:
+    post:
+      summary: 'Proxied to download-service (stage 2); full contract in download.openapi.yaml'
+      description: |
+        `/api/v1/downloads` and `/api/v1/downloads/*` (list, `/{id}`, `/{id}/events` SSE,
+        `/{id}/file`) are reverse-proxied with the caller's user id and the gateway's
+        `X-Internal-Token` (a client-supplied `X-Internal-Token` is dropped). Without
+        `DOWNLOAD_SERVICE_URL` the gateway answers 501 NOT_IMPLEMENTED
+        ("download-service is not deployed in this environment (set DOWNLOAD_SERVICE_URL)").
+      responses:
+        '200': { description: 'existing / cached job (see download.openapi.yaml)' }
+        '202': { description: queued }
+        '400': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /internal/v1/bot/downloads:
+    post:
+      summary: 'Service-to-service: bot-service forwards a detected link (never exposed publicly)'
+      security: [ { internal: [] } ]
+      description: |
+        Upserts the Telegram user, then forwards `{userId, telegramId, chatId, url, lang,
+        statusMessageId, replyToMessageId}` to download-service `POST /internal/v1/downloads`
+        and relays its response (status code and body). Progress and the result reach the
+        bot asynchronously through the Redis stream `download:events` (download.openapi.yaml,
+        `x-events`). Without `DOWNLOAD_SERVICE_URL` this is an honest 501 NOT_IMPLEMENTED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [telegramId, chatId, url]
+              properties:
+                telegramId: { type: integer, format: int64, minimum: 1 }
+                chatId: { type: integer, format: int64 }
+                url: { type: string, format: uri, maxLength: 2048, description: http(s) only }
+                firstName: { type: string }
+                lastName: { type: string }
+                username: { type: string }
+                languageCode: { type: string, maxLength: 16 }
+                statusMessageId: { type: integer, format: int64, description: 'bot ack message to edit with progress' }
+                replyToMessageId: { type: integer, format: int64, description: "user's message with the link (the file replies to it)" }
+      responses:
+        '200': { description: 'already done / in progress (dedup); result is re-published to the stream' }
+        '202': { description: queued by download-service }
+        '400': { description: 'INVALID_URL | UNSUPPORTED_SOURCE | PLAYLIST_NOT_SUPPORTED | FORBIDDEN_HOST', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { description: 'QUOTA_ACTIVE | QUOTA_DAILY (Retry-After header)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '501': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT, description: 'HS256 access token, 15 min; claims sub (user UUID), tid, role, sid' }
+    internal: { type: http, scheme: bearer, description: INTERNAL_API_TOKEN shared by internal services }
+  responses:
+    Error: { description: error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  schemas:
+    ErrorCode:
+      type: string
+      enum: [INVALID, INVALID_INIT_DATA, INIT_DATA_EXPIRED, UNAUTHORIZED, TOKEN_EXPIRED, REFRESH_INVALID, REFRESH_REUSED, FORBIDDEN, NOT_FOUND, RATE_LIMITED, SERVICE_UNAVAILABLE, NOT_IMPLEMENTED, INTERNAL]
+    Error:
+      type: object
+      required: [message, code]
+      properties:
+        message: { type: string }
+        code: { $ref: '#/components/schemas/ErrorCode' }
+        service: { type: string, description: 'upstream name for 501/503: music | download | streaming' }
+        fields: { type: object, description: per-field validation errors (400 INVALID) }
+    RefreshBody: { type: object, additionalProperties: false, required: [refreshToken], properties: { refreshToken: { type: string, minLength: 16, maxLength: 256 } } }
+    User:
+      type: object
+      required: [id, telegramId, firstName, lastName, username, photoUrl, languageCode, role]
+      properties:
+        id: { type: string, format: uuid }
+        telegramId: { type: integer, format: int64 }
+        firstName: { type: string }
+        lastName: { type: [string, 'null'] }
+        username: { type: [string, 'null'] }
+        photoUrl: { type: [string, 'null'] }
+        languageCode: { type: [string, 'null'] }
+        role: { type: string, enum: [user, admin] }
+    AuthTokens:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string, description: 'opaque, 30 days, one-time use' }
+        expiresIn: { type: integer, description: access token lifetime in seconds }
+        user: { $ref: '#/components/schemas/User' }
+    Ready:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        checks: { type: object, additionalProperties: { type: string, enum: [ok, down] } }

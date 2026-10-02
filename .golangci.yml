@@ -1,0 +1,46 @@
+# golangci-lint v2 config shared by every Go module (spec §13).
+version: "2"
+run:
+  timeout: 5m
+  tests: true
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - revive
+    - gosec
+    - ineffassign
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - noctx
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: context-as-argument
+        - name: unused-parameter
+          disabled: true
+    gosec:
+      excludes:
+        - G104 # duplicated by errcheck
+  exclusions:
+    generated: strict
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, bodyclose, revive, errcheck]
+formatters:
+  enable:
+    - gofumpt
+  exclusions:
+    generated: strict

@@ -1,0 +1,349 @@
+# TapeNest — local development infrastructure (spec §10.1, §18.4).
+#
+#   make infra-up            # core: postgres, redis, minio, navidrome, torrserver
+#   make infra-up-all        # + observability (prometheus, grafana) + edge (nginx)
+#
+#   make app-up              # + Go services (api-gateway, bot-service), profile "app"
+#
+# Every port is bound to 127.0.0.1 — *arr/Navidrome/TorrServer must never be
+# public (spec §14). Values come from ../.env (see ../.env.example); the
+# defaults below are for local dev only.
+name: tapenest-dev
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  postgres:
+    <<: *restart
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tapenest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tapenest_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-tapenest}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # one database, a schema per service (spec §3.1 #12)
+      - ./pg/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    <<: *restart
+    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    <<: *restart
+    # Upstream MinIO CE images were withdrawn (Docker Hub, 2026-09); pgsty/minio
+    # is a maintained drop-in fork — see docs/adr/0003-minio-image-source.md.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tapenest}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-tapenest_dev_secret}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001" # console: create buckets (spec §11)
+    volumes:
+      - minio_data:/data
+
+  navidrome:
+    <<: *restart
+    image: deluan/navidrome:0.53.3@sha256:d864c5ddbae508920b157d73b08bd48e93ec8c422003a491edd01a889497582a
+    environment:
+      ND_SCANSCHEDULE: 1h
+      ND_LOGLEVEL: info
+      ND_ENABLEINSIGHTSCOLLECTOR: "false"
+      ND_ENABLEEXTERNALSERVICES: "false"
+      ND_LASTFM_ENABLED: "false"
+      # The admin (NAVIDROME_USER/NAVIDROME_PASSWORD) is created by music-service via
+      # POST /auth/createAdmin on first start — not ND_DEVAUTOCREATEADMINPASSWORD,
+      # which logs the password in clear text (ADR 0009).
+    ports:
+      - "127.0.0.1:${NAVIDROME_PORT:-4533}:4533"
+    volumes:
+      - navidrome_data:/data
+      - ${MUSIC_DIR:-../data/music}:/music:ro
+
+  torrserver:
+    <<: *restart
+    # spec §3.2: ghcr.io/yourok/torrserver pinned by digest (tag MatriX.145)
+    image: ghcr.io/yourok/torrserver:MatriX.145@sha256:d32d5de9472bc9847aee5c536d34885fdc9332b957d9fc2c707ea064932a583d
+    environment:
+      TS_PORT: 8090
+      TS_DONTKILL: 1
+      TS_CONF_PATH: /opt/ts/config
+      TS_TORR_DIR: /opt/ts/torrents
+    ports:
+      - "127.0.0.1:${TORRSERVER_PORT:-8090}:8090" # UI/API — internal only
+    volumes:
+      - torrserver_data:/opt/ts
+
+  # ── Go services (profile "app"; stage 1) ──────────────────────────────────
+  api-gateway:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/api-gateway
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      API_GATEWAY_PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      TRUST_PROXY_HEADERS: "true"
+      DOWNLOAD_SERVICE_URL: http://download-service:8082
+      MUSIC_SERVICE_URL: http://music-service:8084
+    ports:
+      - "127.0.0.1:${API_GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  bot-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/bot-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      BOT_SERVICE_PORT: "8081"
+      GATEWAY_URL: http://api-gateway:8080
+      REDIS_URL: redis://redis:6379/0
+      TELEGRAM_UPLOAD_LIMIT: ${TELEGRAM_UPLOAD_LIMIT:-50000000}
+    ports:
+      - "127.0.0.1:${BOT_SERVICE_PORT:-8081}:8081"
+    depends_on:
+      redis: { condition: service_healthy }
+      api-gateway: { condition: service_started }
+
+  # ── stage 2: downloads (API + worker share one image) ─────────────────────
+  download-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/download-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment: &download-env
+      DOWNLOAD_SERVICE_PORT: "8082"
+      DOWNLOAD_WORKER_PORT: "8083"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-tapenest}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-tapenest_dev_secret}
+      MIGRATE_ON_START: "true"
+    command: ["download-service"]
+    ports:
+      - "127.0.0.1:${DOWNLOAD_SERVICE_PORT:-8082}:8082"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_started }
+
+  download-worker:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/download-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      <<: *download-env
+      MIGRATE_ON_START: "false" # the API container owns migrations
+    command: ["download-worker"]
+    stop_grace_period: 60s # drain in-flight downloads (DOWNLOAD_DRAIN_TIMEOUT)
+    tmpfs:
+      - /var/tmp/tapenest-dl:size=4g,uid=10001,gid=10001
+    depends_on:
+      download-service: { condition: service_started }
+
+  # ── stage 3: music (API + worker share one image; audio from Navidrome) ───
+  music-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/music-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment: &music-env
+      MUSIC_SERVICE_PORT: "8084"
+      MUSIC_WORKER_PORT: "8085"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      NAVIDROME_URL: http://navidrome:4533
+      RECO_SERVICE_URL: http://reco-service:8086 # My Wave → reco, heuristic fallback when down (ADR 0010)
+      MIGRATE_ON_START: "true"
+    ports:
+      - "127.0.0.1:${MUSIC_SERVICE_PORT:-8084}:8084"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      navidrome: { condition: service_started }
+
+  music-worker:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/music-service
+    entrypoint: ["/music-worker"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      <<: *music-env
+      MIGRATE_ON_START: "false" # the API container owns migrations
+    depends_on:
+      music-service: { condition: service_started }
+
+  # ── My Wave recommender (ADR 0010; API + worker share one image) ─────────
+  reco-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/reco-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment: &reco-env
+      RECO_SERVICE_PORT: "8086"
+      RECO_WORKER_PORT: "8087"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      MUSIC_SERVICE_URL: http://music-service:8084
+      MIGRATE_ON_START: "true"
+    ports:
+      - "127.0.0.1:${RECO_SERVICE_PORT:-8086}:8086"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  reco-worker:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/reco-service
+    entrypoint: ["/reco-worker"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      <<: *reco-env
+      MIGRATE_ON_START: "false" # the API container owns migrations
+    depends_on:
+      reco-service: { condition: service_started }
+      music-service: { condition: service_started }
+
+  # ── invisible acquisition (ADR 0011; API + worker share one image) ─────
+  acquisition-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/acquisition-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment: &acquisition-env
+      ACQUISITION_SERVICE_PORT: "8088"
+      ACQUISITION_WORKER_PORT: "8089"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      MUSIC_SERVICE_URL: http://music-service:8084
+      LIDARR_URL: ${LIDARR_URL:-http://host.docker.internal:8686}
+      PROWLARR_URL: ${PROWLARR_URL:-http://host.docker.internal:9696}
+      QBITTORRENT_URL: ${QBITTORRENT_URL:-http://host.docker.internal:8092}
+      MUSIC_DIR: /music
+      TORRENT_DIR: /downloads
+      MIGRATE_ON_START: "true"
+    ports:
+      - "127.0.0.1:${ACQUISITION_SERVICE_PORT:-8088}:8088"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${MUSIC_DIR:-../data/music}:/music
+      - ${TORRENT_DIR:-../data/torrents}:/downloads
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      music-service: { condition: service_started }
+
+  acquisition-worker:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/acquisition-service
+    entrypoint: ["/acquisition-worker"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      <<: *acquisition-env
+      MIGRATE_ON_START: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${MUSIC_DIR:-../data/music}:/music
+      - ${TORRENT_DIR:-../data/torrents}:/downloads
+    depends_on:
+      acquisition-service: { condition: service_started }
+
+  # ── observability (profile) ───────────────────────────────────────────
+  prometheus:
+    <<: *restart
+    profiles: ["observability"]
+    image: prom/prometheus:v3.9.1@sha256:1f0f50f06acaceb0f5670d2c8a658a599affe7b0d8e78b898c1035653849a702
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    <<: *restart
+    profiles: ["observability"]
+    image: grafana/grafana:12.4.9@sha256:9b58461280b4d2992d4399823c9427d0fcf5f0fd7f376c93f2dea876158b867b
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-tapenest_dev}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  # ── edge (profile): /api → api-gateway, /hls → streaming, / → Vite ──────
+  nginx:
+    <<: *restart
+    profiles: ["edge"]
+    image: nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    ports:
+      - "127.0.0.1:${NGINX_PORT:-8088}:80"
+    volumes:
+      - ./nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
+  navidrome_data:
+  torrserver_data:
+  prometheus_data:
+  grafana_data:

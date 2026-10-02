@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS music.acquired_files;
+DROP INDEX IF EXISTS music.albums_artist;
+DROP INDEX IF EXISTS music.tracks_album_order;
+DELETE FROM music.tracks WHERE navidrome_id IS NULL;
+DELETE FROM music.albums WHERE navidrome_id IS NULL;
+DELETE FROM music.artists WHERE navidrome_id IS NULL;
+ALTER TABLE music.tracks DROP COLUMN IF EXISTS mb_artist_id, DROP COLUMN IF EXISTS mb_release_group_id, DROP COLUMN IF EXISTS mb_recording_id;
+ALTER TABLE music.tracks ALTER COLUMN navidrome_id SET NOT NULL;
+ALTER TABLE music.albums DROP COLUMN IF EXISTS mbid;
+ALTER TABLE music.albums ALTER COLUMN navidrome_id SET NOT NULL;
+ALTER TABLE music.artists DROP COLUMN IF EXISTS mbid;
+ALTER TABLE music.artists ALTER COLUMN navidrome_id SET NOT NULL;

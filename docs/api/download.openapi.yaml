@@ -1,0 +1,270 @@
+openapi: 3.0.3
+info:
+  title: TapeNest download-service
+  version: 0.2.0
+  description: |
+    Stage 2 — downloads of public videos from YouTube, VK Video and RuTube (yt-dlp + ffmpeg),
+    stored in MinIO (bucket `media`, retention `MEDIA_RETENTION`, default 7 days).
+
+    * Public clients call the **gateway** (`/api/v1/downloads*`, bearer JWT); the gateway
+      forwards to this service with `X-User-Id` and `X-Internal-Token`. The service itself is
+      never exposed publicly.
+    * bot-service goes through the gateway's `/internal/v1/bot/downloads`, which calls
+      `POST /internal/v1/downloads` here.
+    * Result/progress for bot jobs is published to the Redis stream `download:events`
+      (see `x-events` and the `DownloadEvent` schema).
+    * Dedup: the same normalized URL for the same user returns the active job (200); a
+      URL already in storage returns a `done` job immediately (200, `cached` event).
+    * Quotas (per user): `DOWNLOAD_QUOTA_ACTIVE` (default 3) active jobs,
+      `DOWNLOAD_QUOTA_DAILY` (default 30) jobs per rolling 24 h.
+    * Format: one profile — best mp4 (h264/aac) ≤ `DOWNLOAD_MAX_HEIGHT` (720), preferring the
+      highest variant that fits `TELEGRAM_UPLOAD_LIMIT` (50 MB) at ≥ 360p. Playlists, live
+      streams and DRM content are rejected (no DRM circumvention, ever).
+    See docs/adr/0008-downloads-storage-delivery.md.
+servers:
+  - url: http://download-service:8082
+    description: internal (compose); dev http://127.0.0.1:8082
+security:
+  - internal: []
+tags:
+  - name: downloads
+  - name: internal
+  - name: ops
+paths:
+  /healthz:
+    get:
+      tags: [ops]
+      security: []
+      summary: Liveness
+      responses:
+        '200': { description: ok }
+  /readyz:
+    get:
+      tags: [ops]
+      security: []
+      summary: Readiness (postgres, redis, minio)
+      responses:
+        '200': { description: all dependencies ok, content: { application/json: { schema: { $ref: '#/components/schemas/Ready' } } } }
+        '503': { description: a dependency is down, content: { application/json: { schema: { $ref: '#/components/schemas/Ready' } } } }
+  /internal/v1/downloads:
+    post:
+      tags: [internal]
+      summary: Create a job on behalf of the Telegram bot (called by api-gateway)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InternalCreate' }
+      responses:
+        '200': { $ref: '#/components/responses/ExistingJob' }
+        '202': { $ref: '#/components/responses/Queued' }
+        '400': { $ref: '#/components/responses/BadLink' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Quota' }
+        '503': { $ref: '#/components/responses/Error' }
+  /api/v1/downloads:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [downloads]
+      summary: Create a download job (mini-app)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [url]
+              properties:
+                url: { type: string, format: uri, maxLength: 2048, example: 'https://youtu.be/jNQXAC9IVRw' }
+      responses:
+        '200': { $ref: '#/components/responses/ExistingJob' }
+        '202': { $ref: '#/components/responses/Queued' }
+        '400': { $ref: '#/components/responses/BadLink' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Quota' }
+    get:
+      tags: [downloads]
+      summary: The caller's jobs, newest first (cursor pagination)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string }, description: opaque `nextCursor` from the previous page }
+      responses:
+        '200':
+          description: page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Job' } }
+                  nextCursor: { type: string, nullable: true }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/downloads/{id}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [downloads]
+      summary: One job (only the owner can see it; others get 404)
+      responses:
+        '200': { description: job, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/downloads/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [downloads]
+      summary: Server-Sent Events with job progress
+      description: |
+        Every message is `event: job` with a full `Job` as `data`. The first message is the
+        current state; the stream ends after `done`/`failed`. Comment pings (`: ping`) every
+        15 s keep proxies from closing the connection.
+      responses:
+        '200':
+          description: event stream
+          content:
+            text/event-stream:
+              schema: { type: string, example: "event: job\ndata: {\"id\":\"…\",\"status\":\"running\",\"stage\":\"downloading\",\"progress\":{\"pct\":37}}\n\n" }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/downloads/{id}/file:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/JobId'
+      - { name: redirect, in: query, schema: { type: string, enum: ['false'] }, description: '`false` → JSON instead of 302' }
+    get:
+      tags: [downloads]
+      summary: Presigned download link (TTL `PRESIGN_TTL`, ≤ 1 h) on the public origin `/media/…`
+      responses:
+        '200': { description: 'redirect=false', content: { application/json: { schema: { type: object, required: [url], properties: { url: { type: string, format: uri } } } } } }
+        '302': { description: redirect to the presigned URL, headers: { Location: { schema: { type: string, format: uri } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { description: 'NOT_READY — job is not done (or the file expired)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: 'PUBLIC_LINKS_DISABLED — S3_PUBLIC_URL is not configured', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+components:
+  securitySchemes:
+    internal: { type: apiKey, in: header, name: X-Internal-Token, description: INTERNAL_API_TOKEN (set by api-gateway) }
+  parameters:
+    UserId: { name: X-User-Id, in: header, required: true, schema: { type: string, format: uuid }, description: set by api-gateway from the JWT }
+    JobId: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+  responses:
+    Error: { description: error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Queued: { description: new job queued, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+    ExistingJob: { description: 'dedup: the active job for this URL, or a done job served from storage', content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+    BadLink: { description: 'INVALID | INVALID_URL | UNSUPPORTED_SOURCE | PLAYLIST_NOT_SUPPORTED | FORBIDDEN_HOST', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Quota:
+      description: 'QUOTA_ACTIVE (Retry-After: 60) | QUOTA_DAILY (Retry-After: 3600)'
+      headers: { Retry-After: { schema: { type: integer } } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  schemas:
+    Error:
+      type: object
+      required: [message, code]
+      properties:
+        message: { type: string }
+        code:
+          type: string
+          enum: [INVALID, INVALID_URL, UNSUPPORTED_SOURCE, PLAYLIST_NOT_SUPPORTED, FORBIDDEN_HOST, QUOTA_ACTIVE, QUOTA_DAILY, UNAUTHORIZED, NOT_FOUND, NOT_READY, PUBLIC_LINKS_DISABLED, INTERNAL, SERVICE_UNAVAILABLE]
+    Ready:
+      type: object
+      additionalProperties: { type: string, enum: [ok, down] }
+      example: { postgres: ok, redis: ok, minio: ok }
+    InternalCreate:
+      type: object
+      required: [userId, telegramId, chatId, url]
+      properties:
+        userId: { type: string, format: uuid }
+        telegramId: { type: integer, format: int64 }
+        chatId: { type: integer, format: int64 }
+        url: { type: string, format: uri, maxLength: 2048 }
+        statusMessageId: { type: integer, format: int64, description: bot message edited with progress }
+        replyToMessageId: { type: integer, format: int64 }
+        lang: { type: string, example: ru }
+    Source: { type: string, enum: [youtube, vk, rutube] }
+    Status: { type: string, enum: [queued, running, done, failed] }
+    ErrorKind:
+      type: string
+      enum: [unavailable, private, drm_protected, geo_blocked, bot_check, rate_limited, network, too_large, live, unsupported, internal]
+      description: rate_limited/network/bot_check/geo_blocked are retried with escalating proxy tiers; the rest are final
+    Progress:
+      type: object
+      required: [stage, pct]
+      properties:
+        stage: { type: string, enum: [probing, downloading, uploading] }
+        pct: { type: number, minimum: 0, maximum: 100 }
+        downloadedBytes: { type: integer, format: int64 }
+        totalBytes: { type: integer, format: int64 }
+        speedBps: { type: number }
+        etaSec: { type: integer }
+    File:
+      type: object
+      required: [fileName, sizeBytes, mimeType, expiresAt]
+      properties:
+        fileName: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        mimeType: { type: string, example: video/mp4 }
+        durationSec: { type: integer }
+        width: { type: integer }
+        height: { type: integer }
+        expiresAt: { type: string, format: date-time, description: storage retention end }
+    Job:
+      type: object
+      required: [id, url, source, status, attempts, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, description: normalized URL }
+        source: { $ref: '#/components/schemas/Source' }
+        status: { $ref: '#/components/schemas/Status' }
+        stage: { type: string, enum: [probing, downloading, uploading] }
+        progress: { $ref: '#/components/schemas/Progress' }
+        title: { type: string }
+        attempts: { type: integer }
+        errorKind: { $ref: '#/components/schemas/ErrorKind' }
+        errorMessage: { type: string, description: 'redacted, human-readable' }
+        file: { $ref: '#/components/schemas/File' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    DownloadEvent:
+      description: 'Redis stream `download:events`, field `data` = this JSON (at-least-once; consumers dedup by jobId)'
+      type: object
+      required: [type, jobId, userId, status, source, url, at]
+      properties:
+        type: { type: string, enum: [download.progress, video.downloaded, download.failed] }
+        jobId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/Status' }
+        chatId: { type: integer, format: int64, description: 'set for bot jobs only' }
+        statusMessageId: { type: integer, format: int64 }
+        replyToMessageId: { type: integer, format: int64 }
+        lang: { type: string }
+        source: { $ref: '#/components/schemas/Source' }
+        url: { type: string }
+        title: { type: string }
+        progress: { $ref: '#/components/schemas/Progress' }
+        file:
+          type: object
+          properties:
+            sizeBytes: { type: integer, format: int64 }
+            mimeType: { type: string }
+            fileName: { type: string }
+            durationSec: { type: integer }
+            width: { type: integer }
+            height: { type: integer }
+            internalUrl: { type: string, description: 'presigned on the internal S3 endpoint (bot fetches and uploads to Telegram)' }
+            publicUrl: { type: string, description: 'presigned on the public origin /media (link for files > 50 MB)' }
+            expiresAt: { type: string, format: date-time }
+        errorKind: { $ref: '#/components/schemas/ErrorKind' }
+        cached: { type: boolean }
+        attempt: { type: integer }
+        at: { type: string, format: date-time }
+x-events:
+  download:events:
+    transport: redis-stream
+    maxlen: '~10000'
+    schema: { $ref: '#/components/schemas/DownloadEvent' }
+    consumers: [bot-service (group bot-service)]

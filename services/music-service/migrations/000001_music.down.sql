@@ -1,0 +1,11 @@
+DROP MATERIALIZED VIEW IF EXISTS music.track_popularity;
+DROP FUNCTION IF EXISTS music.ensure_play_events_partition(date);
+DROP TABLE IF EXISTS music.play_events;
+DROP TABLE IF EXISTS music.recent_plays;
+DROP TABLE IF EXISTS music.playback_positions;
+DROP TABLE IF EXISTS music.playlist_tracks;
+DROP TABLE IF EXISTS music.playlists;
+DROP TABLE IF EXISTS music.likes;
+DROP TABLE IF EXISTS music.tracks;
+DROP TABLE IF EXISTS music.albums;
+DROP TABLE IF EXISTS music.artists;

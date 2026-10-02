@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Test double for yt-dlp. Behaviour via env:
+#   FAKE_YTDLP_MODE   ok (default) | fail:<stderr text> | badjson | nofile | slow
+#   FAKE_YTDLP_INFO   file with metadata JSON for --dump-single-json
+#   FAKE_YTDLP_ARGS   when set, argv is appended to this file (one per line)
+set -u
+[[ -n "${FAKE_YTDLP_ARGS:-}" ]] && printf '%s\n' "$@" "--END--" >>"$FAKE_YTDLP_ARGS"
+mode="${FAKE_YTDLP_MODE:-ok}"
+if [[ "$mode" == fail:* ]]; then
+  echo "WARNING: something harmless" >&2
+  echo "ERROR: ${mode#fail:}" >&2
+  exit 1
+fi
+[[ "$mode" == slow ]] && sleep 10
+dir="" out="" probe=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dump-single-json) probe=1 ;;
+    -P) dir="$2"; shift ;;
+    -o) out="$2"; shift ;;
+  esac
+  shift
+done
+if [[ $probe == 1 ]]; then
+  if [[ "$mode" == badjson ]]; then echo "not json"; exit 0; fi
+  if [[ -n "${FAKE_YTDLP_INFO:-}" ]]; then cat "$FAKE_YTDLP_INFO"; else
+    echo '{"id":"abc","title":"Test clip","duration":12,"extractor_key":"Youtube","formats":[{"format_id":"18","ext":"mp4","vcodec":"avc1.42001E","acodec":"mp4a.40.2","height":360,"width":640,"filesize":1000}]}'
+  fi
+  exit 0
+fi
+if [[ "$out" == "-" ]]; then # stream mode: file on stdout, progress on stderr
+  echo "[info] streaming" >&2
+  echo "TNPROG 5 10 NA 100.0 1" >&2
+  printf 'VIDEODATA'
+  echo "TNPROG 10 10 NA 100.0 0" >&2
+  exit 0
+fi
+echo "[info] downloading"
+echo "TNPROG 50 100 NA 1000.0 2"
+echo "TNPROG 100 100 NA 1000.0 0"
+echo "TNPROG 10 20 NA 500.0 1"
+echo "TNPROG 20 20 NA 500.0 0"
+[[ "$mode" == nofile ]] && exit 0
+printf 'MERGEDVIDEO' >"$dir/abc.mp4"
+echo "TNFILE $dir/abc.mp4"

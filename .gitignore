@@ -1,0 +1,40 @@
+# ── secrets ─────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+# local secrets text file in the repo root (bot token / ngrok authtoken)
+/*.txt
+*ngrok*.txt
+*.pem
+*.key
+
+# ── build output / deps ─────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+bin/
+*.test
+*.out
+proto/gen/*
+!proto/gen/.gitkeep
+
+# ── logs / runtime ──────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+*.pid
+data/
+
+# ── editors / OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

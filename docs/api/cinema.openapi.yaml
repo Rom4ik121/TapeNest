@@ -1,0 +1,204 @@
+openapi: 3.1.0
+info:
+  title: TapeNest CineNest API
+  version: 0.1.0
+  description: |
+    Contract between apps/cinenest and api-gateway → streaming-service (stage 4).
+    Until streaming-service is deployed the gateway answers `501 NOT_IMPLEMENTED`
+    (service `streaming`) for every `/cinema/*` path; the frontend uses MSW mocks for the
+    `cinema` domain in dev (`VITE_USE_MOCKS`). Auth (`/auth/*`, `/me`) — see gateway.openapi.yaml.
+
+    Conventions: UUID ids, cursor pagination (`cursor` + `limit` → `nextCursor`, null at the end),
+    errors `{message, code, service?}`. HLS playlists are served by streaming-service under
+    `/hls/*` (nginx route, spec §10.1) with segment URLs rewritten to absolute paths on our
+    domain (spec §5.5); the player sends the access token as `Authorization: Bearer` for
+    same-origin HLS requests.
+servers:
+  - url: http://localhost:8080/api/v1
+security:
+  - bearer: []
+paths:
+  /cinema/titles:
+    get:
+      summary: Catalog grid (search via pg_trgm when q is set)
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: kind, in: query, schema: { $ref: '#/components/schemas/TitleKind' } }
+        - { $ref: '#/components/parameters/cursor' }
+        - { $ref: '#/components/parameters/limit' }
+      responses:
+        '200': { $ref: '#/components/responses/TitlePage' }
+        '501': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /cinema/titles/{id}:
+    parameters: [ { $ref: '#/components/parameters/id' } ]
+    get:
+      summary: Title card with torrent files (episode / quality / size)
+      responses:
+        '200': { description: title, content: { application/json: { schema: { $ref: '#/components/schemas/Title' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /cinema/titles/{id}/watchlist:
+    parameters: [ { $ref: '#/components/parameters/id' } ]
+    put: { summary: Add to "watch later", responses: { '204': { description: added }, '404': { $ref: '#/components/responses/Error' } } }
+    delete: { summary: Remove from "watch later", responses: { '204': { description: removed } } }
+  /cinema/titles/{id}/position:
+    parameters: [ { $ref: '#/components/parameters/id' } ]
+    get:
+      summary: Saved watch position for a file of the title
+      parameters: [ { name: fileId, in: query, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: position, content: { application/json: { schema: { $ref: '#/components/schemas/WatchPosition' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      summary: Save position (client debounces 5 s + forced flush on pause / switch / hide)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fileId, positionSec, durationSec]
+              properties:
+                fileId: { type: string, format: uuid }
+                positionSec: { type: number, minimum: 0 }
+                durationSec: { type: number, minimum: 0 }
+      responses: { '204': { description: saved } }
+  /cinema/continue:
+    get:
+      summary: '"Continue watching" — most recent unfinished positions'
+      parameters: [ { $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' } ]
+      responses:
+        '200':
+          description: page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ContinueItem' } }
+                  nextCursor: { type: [string, 'null'] }
+  /cinema/watchlist:
+    get:
+      summary: '"Watch later" list'
+      parameters: [ { $ref: '#/components/parameters/cursor' }, { $ref: '#/components/parameters/limit' } ]
+      responses: { '200': { $ref: '#/components/responses/TitlePage' } }
+  /cinema/streams:
+    post:
+      summary: Start (or reuse) a TorrServer stream for a file; returns immediately while warming
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [titleId, fileId]
+              properties:
+                titleId: { type: string, format: uuid }
+                fileId: { type: string, format: uuid }
+      responses:
+        '201': { description: session, content: { application/json: { schema: { $ref: '#/components/schemas/StreamSession' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /cinema/streams/{id}:
+    parameters: [ { $ref: '#/components/parameters/id' } ]
+    get:
+      summary: Poll warm-up status (client polls ~1 s while `warming`)
+      responses:
+        '200': { description: session, content: { application/json: { schema: { $ref: '#/components/schemas/StreamSession' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+    delete: { summary: Stop the stream (player closed), responses: { '204': { description: stopped } } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    cursor: { name: cursor, in: query, schema: { type: string } }
+    limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 24 } }
+  responses:
+    Error: { description: error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    TitlePage:
+      description: page of titles
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items, nextCursor]
+            properties:
+              items: { type: array, items: { $ref: '#/components/schemas/TitleSummary' } }
+              nextCursor: { type: [string, 'null'] }
+  schemas:
+    Error:
+      type: object
+      required: [message, code]
+      properties:
+        message: { type: string }
+        code: { type: string }
+        service: { type: string }
+    TitleKind: { type: string, enum: [movie, series] }
+    TitleSummary:
+      type: object
+      required: [id, kind, title, originalTitle, year, posterUrl, rating, genres, inWatchlist]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/TitleKind' }
+        title: { type: string }
+        originalTitle: { type: [string, 'null'] }
+        year: { type: [integer, 'null'] }
+        posterUrl: { type: [string, 'null'], description: 2:3 poster (presigned MinIO or proxied) }
+        rating: { type: [number, 'null'], minimum: 0, maximum: 10 }
+        genres: { type: array, items: { type: string } }
+        inWatchlist: { type: boolean }
+    MediaFile:
+      type: object
+      required: [id, name, season, episode, quality, sizeBytes, durationSec]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, description: file name inside the torrent }
+        season: { type: [integer, 'null'] }
+        episode: { type: [integer, 'null'] }
+        quality: { type: string, examples: ['720p', '1080p', '2160p'] }
+        sizeBytes: { type: integer, format: int64 }
+        durationSec: { type: [number, 'null'] }
+    Title:
+      allOf:
+        - $ref: '#/components/schemas/TitleSummary'
+        - type: object
+          required: [description, backdropUrl, runtimeMin, files]
+          properties:
+            description: { type: string }
+            backdropUrl: { type: [string, 'null'] }
+            runtimeMin: { type: [integer, 'null'] }
+            files: { type: array, items: { $ref: '#/components/schemas/MediaFile' } }
+    StreamStatus: { type: string, enum: [warming, ready, failed] }
+    StreamSession:
+      type: object
+      required: [id, titleId, fileId, status, bufferedPct, peers, speedBps, hlsUrl, error]
+      properties:
+        id: { type: string, format: uuid }
+        titleId: { type: string, format: uuid }
+        fileId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/StreamStatus' }
+        bufferedPct: { type: number, minimum: 0, maximum: 100, description: TorrServer preload progress }
+        peers: { type: integer, minimum: 0 }
+        speedBps: { type: number, minimum: 0 }
+        hlsUrl: { type: [string, 'null'], description: 'absolute path on our domain, e.g. /hls/{id}/index.m3u8; null until ready' }
+        error: { type: [string, 'null'] }
+    WatchPosition:
+      type: object
+      required: [titleId, fileId, positionSec, durationSec, updatedAt]
+      properties:
+        titleId: { type: string, format: uuid }
+        fileId: { type: string, format: uuid }
+        positionSec: { type: number }
+        durationSec: { type: number }
+        updatedAt: { type: string, format: date-time }
+    ContinueItem:
+      type: object
+      required: [title, file, position]
+      properties:
+        title: { $ref: '#/components/schemas/TitleSummary' }
+        file: { $ref: '#/components/schemas/MediaFile' }
+        position: { $ref: '#/components/schemas/WatchPosition' }
