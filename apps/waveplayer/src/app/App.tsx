@@ -6,6 +6,8 @@ import { useAuthStore, type AuthErrorKind } from '@/entities/auth/authStore';
 import { ensureSession } from '@/entities/auth/session';
 import { startPlayerLifecycle } from '@/entities/player';
 import { HomePage } from '@/features/home/HomePage';
+import { VideoLibraryPage } from '@/features/videos/LibraryPage';
+import { VideoPage } from '@/features/videos/VideoPage';
 import { LibraryPage } from '@/features/library/LibraryPage';
 import { LikedPage } from '@/features/library/LikedPage';
 import { PlaylistPage } from '@/features/library/PlaylistPage';
@@ -20,7 +22,11 @@ import { Toast } from '@/shared/ui/Toast';
 import { haptic, initTelegram, showBackButton } from '@/shared/telegram';
 import { Nav } from './Nav';
 
-const ROOT_TABS = new Set(['/', '/wave', '/search', '/library']);
+const ROOT_TABS = new Set(['/', '/wave', '/search', '/library', '/videos']);
+
+function isVideoPath(path: string): boolean {
+  return path === '/videos' || path.startsWith('/videos/');
+}
 
 function Splash({ text }: { text: string }) {
   return (
@@ -78,12 +84,13 @@ function AuthError({ kind }: { kind: AuthErrorKind }) {
 function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const videos = isVideoPath(location.pathname);
 
   // Telegram Back button on nested screens (tabs are roots).
   useEffect(() => {
     if (ROOT_TABS.has(location.pathname)) return;
-    return showBackButton(() => navigate(-1));
-  }, [location.pathname, navigate]);
+    return showBackButton(() => (videos ? navigate('/videos') : navigate(-1)));
+  }, [location.pathname, navigate, videos]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -91,7 +98,7 @@ function Layout() {
 
   return (
     <div className="mx-auto flex min-h-app w-full max-w-lg flex-col pt-safe">
-      <main className="flex-1 px-4 pb-44 pt-3">
+      <main className={videos ? 'flex-1 px-4 pb-8 pt-3' : 'flex-1 px-4 pb-44 pt-3'}>
         {/* key → re-mount wrapper so every screen change plays the enter transition */}
         <div key={location.pathname} className="page-enter">
           <Routes location={location}>
@@ -103,15 +110,19 @@ function Layout() {
             <Route path="/liked" element={<LikedPage />} />
             <Route path="/album/:albumId" element={<AlbumPage />} />
             <Route path="/artist/:artistId" element={<ArtistPage />} />
+            <Route path="/videos" element={<VideoLibraryPage />} />
+            <Route path="/videos/:id" element={<VideoPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
       </main>
-      <div className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-lg">
-        <NowPlayingBar />
-        <Nav />
-      </div>
-      <FullPlayer />
+      {!videos && (
+        <div className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-lg">
+          <NowPlayingBar />
+          <Nav />
+        </div>
+      )}
+      {!videos && <FullPlayer />}
       <Toast />
     </div>
   );

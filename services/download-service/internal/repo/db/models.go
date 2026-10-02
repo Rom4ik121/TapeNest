@@ -32,6 +32,8 @@ type DownloadJob struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	FinishedAt       *time.Time
+	DisplayTitle     string
+	DeletedAt        *time.Time
 }
 
 type DownloadMedium struct {
@@ -51,4 +53,5 @@ type DownloadMedium struct {
 	ThumbnailUrl  string
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
+	PosterKey     string
 }

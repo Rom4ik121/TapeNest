@@ -27,4 +27,9 @@ export const qk = {
     root: ['playlists'] as const,
     detail: (id: string) => ['playlists', id] as const,
   },
+  videos: {
+    list: ['videos', 'list'] as const,
+    one: (id: string) => ['videos', id] as const,
+    file: (id: string) => ['videos', id, 'file'] as const,
+  },
 } as const;

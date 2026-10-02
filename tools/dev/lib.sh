@@ -114,7 +114,7 @@ start_bot() {
   local url="$1"
   stop_proc bot-service
   build_go bot-service
-  TELEGRAM_WEBHOOK_URL="$url/tg/webhook" MINIAPP_WAVEPLAYER_URL="$url/" MINIAPP_CINENEST_URL="$url/cinenest/" \
+  TELEGRAM_WEBHOOK_URL="$url/tg/webhook" MINIAPP_WAVEPLAYER_URL="$url/" MINIAPP_VIDEOS_URL="$url/#/videos" \
     spawn bot-service "$BIN_DIR/bot-service"
   wait_http "http://127.0.0.1:${BOT_SERVICE_PORT:-8081}/readyz" 30 || { echo "bot-service not ready, see $LOG_DIR/bot-service.log" >&2; return 1; }
   echo "$url" >"$LOG_DIR/miniapp-url.txt"

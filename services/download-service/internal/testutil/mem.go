@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -61,7 +62,7 @@ func (s *MemStore) GetJob(_ context.Context, id uuid.UUID) (domain.Job, error) {
 // GetUserJob implements the port.
 func (s *MemStore) GetUserJob(ctx context.Context, userID, id uuid.UUID) (domain.Job, error) {
 	j, err := s.GetJob(ctx, id)
-	if err == nil && j.UserID != userID {
+	if err == nil && (j.UserID != userID || j.DeletedAt != nil) {
 		return domain.Job{}, repo.ErrNotFound
 	}
 	return j, err
@@ -76,7 +77,10 @@ func (s *MemStore) ListUserJobs(_ context.Context, userID uuid.UUID, after *repo
 	}
 	var out []domain.Job
 	for _, j := range s.Jobs {
-		if j.UserID == userID && (after == nil || j.CreatedAt.Before(after.CreatedAt)) {
+		if j.UserID != userID || j.DeletedAt != nil {
+			continue
+		}
+		if after == nil || j.CreatedAt.Before(after.CreatedAt) {
 			out = append(out, j)
 		}
 	}
@@ -95,7 +99,7 @@ func (s *MemStore) FindActiveUserJob(_ context.Context, userID uuid.UUID, hash s
 		return domain.Job{}, err
 	}
 	for _, j := range s.Jobs {
-		if j.UserID == userID && j.URLHash == hash && !j.Status.Terminal() {
+		if j.UserID == userID && j.DeletedAt == nil && j.URLHash == hash && !j.Status.Terminal() {
 			return j, nil
 		}
 	}
@@ -114,7 +118,7 @@ func (s *MemStore) CountUserJobs(_ context.Context, userID uuid.UUID, since time
 		if j.UserID != userID {
 			continue
 		}
-		if !j.Status.Terminal() {
+		if j.DeletedAt == nil && !j.Status.Terminal() {
 			active++
 		}
 		if !j.CreatedAt.Before(since) {
@@ -240,6 +244,61 @@ func (s *MemStore) UpsertMedia(_ context.Context, m domain.Media) (domain.Media,
 	return m, nil
 }
 
+// RenameJob implements the port.
+func (s *MemStore) RenameJob(_ context.Context, userID, id uuid.UUID, title string) (domain.Job, error) {
+	return s.update(id, "RenameJob", func(j *domain.Job) bool {
+		if j.UserID != userID || j.DeletedAt != nil || j.Status != domain.StatusDone {
+			return false
+		}
+		j.DisplayTitle = title
+		return true
+	})
+}
+
+// SoftDeleteJob implements the port.
+func (s *MemStore) SoftDeleteJob(_ context.Context, userID, id uuid.UUID) (domain.Job, error) {
+	return s.update(id, "SoftDeleteJob", func(j *domain.Job) bool {
+		if j.UserID != userID || j.DeletedAt != nil {
+			return false
+		}
+		now := s.Now()
+		j.DeletedAt = &now
+		return true
+	})
+}
+
+// CountLiveMediaRefs implements the port.
+func (s *MemStore) CountLiveMediaRefs(_ context.Context, mediaID uuid.UUID) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.err("CountLiveMediaRefs"); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, j := range s.Jobs {
+		if j.DeletedAt == nil && j.MediaID != nil && *j.MediaID == mediaID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// SetPosterKey implements the port.
+func (s *MemStore) SetPosterKey(_ context.Context, mediaID uuid.UUID, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.err("SetPosterKey"); err != nil {
+		return err
+	}
+	m, ok := s.Media[mediaID]
+	if !ok {
+		return repo.ErrNotFound
+	}
+	m.PosterKey = key
+	s.Media[mediaID] = m
+	return nil
+}
+
 // Job returns a job snapshot.
 // Job implements the port.
 func (s *MemStore) Job(id uuid.UUID) domain.Job {
@@ -298,4 +357,31 @@ func (f *MemFiles) PresignPublic(_ context.Context, key, _ string, _ time.Durati
 		return "", nil
 	}
 	return "https://app.example/media/" + key + "?sig=y", nil
+}
+
+// PresignInline implements the port.
+func (f *MemFiles) PresignInline(_ context.Context, key string, _ time.Duration) (string, error) {
+	if f.NoPublic {
+		return "", nil
+	}
+	return "https://app.example/media/" + key + "?inline=1", nil
+}
+
+// Open implements the port.
+func (f *MemFiles) Open(_ context.Context, key string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.Objects[key]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
+}
+
+// Remove implements the port.
+func (f *MemFiles) Remove(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.Objects, key)
+	return nil
 }

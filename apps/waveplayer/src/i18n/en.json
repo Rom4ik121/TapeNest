@@ -170,5 +170,54 @@
     "albums": "Albums",
     "play": "Play",
     "empty": "Nothing here yet"
+  },
+  "videos": {
+    "title": "My videos",
+    "subtitle": "A YouTube, VK or RuTube link stays here after download",
+    "url": "Video link",
+    "download": "Download",
+    "downloading": "Taking the link…",
+    "empty": "Nothing here yet. Send the bot a link or paste one above.",
+    "open": "Open “{{title}}”",
+    "duration": "Duration {{time}}",
+    "untitled": "Untitled",
+    "status": {
+      "queued": "Queued",
+      "running": "Downloading {{pct}}%",
+      "failed": "Download failed"
+    },
+    "source": {
+      "youtube": "YouTube",
+      "vk": "VK",
+      "rutube": "RuTube"
+    },
+    "back": "Back to the list",
+    "play": "Playback",
+    "rename": "Title",
+    "save": "Save",
+    "saving": "Saving…",
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "confirmDelete": "Remove this video from your library?",
+    "cancel": "Cancel",
+    "trim": "Trim",
+    "trimHint": "A new clip is added to the library; the original stays",
+    "start": "Start",
+    "end": "End",
+    "trimSave": "Save clip",
+    "trimming": "Trimming…",
+    "notFound": "Video not found",
+    "errors": {
+      "invalid": "Couldn't parse that link. Check that the whole URL was copied.",
+      "unsupported": "That site isn't supported. Use a YouTube, VK or RuTube link.",
+      "playlist": "Playlists aren't downloaded — send a link to one video.",
+      "quotaActive": "Three downloads are already running. Wait for one to finish.",
+      "quotaDaily": "The daily download limit is used up. Try again tomorrow.",
+      "trim": "Couldn't trim this file.",
+      "trimOff": "Trimming isn't available on this server right now.",
+      "notReady": "This video is still downloading.",
+      "range": "Set a start and an end: at least one second, and inside the video.",
+      "generic": "That didn't work. Try again in a moment."
+    }
   }
 }

@@ -62,7 +62,7 @@ func run() error {
 
 	tg := telegram.NewClient(cfg.TelegramAPI, cfg.BotToken, nil)
 	b := bot.New(tg, gateway.New(cfg.GatewayURL, cfg.InternalToken, cfg.GatewayTimeout), texts,
-		bot.MiniApps{WavePlayer: cfg.WavePlayerURL, CineNest: cfg.CineNestURL}, log)
+		bot.MiniApps{WavePlayer: cfg.WavePlayerURL, Videos: cfg.VideosURL}, log)
 
 	if cfg.SetupOnStart {
 		sctx, cancel := context.WithTimeout(ctx, 30*time.Second)

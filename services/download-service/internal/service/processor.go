@@ -51,6 +51,7 @@ type Processor struct {
 	guard   HostGuard
 	cookies CookieJar
 	proxies ProxyPicker
+	editor  Editor
 }
 
 // ProcessorDeps groups dependencies.
@@ -67,6 +68,7 @@ type ProcessorDeps struct {
 	Guard   HostGuard
 	Cookies CookieJar
 	Proxies ProxyPicker
+	Editor  Editor
 	Log     *slog.Logger
 	Now     func() time.Time
 }
@@ -85,7 +87,7 @@ func NewProcessor(d ProcessorDeps) *Processor {
 	return &Processor{
 		mediaIndex: mediaIndex{store: d.Store, bus: d.Bus, files: d.Files, log: d.Log, now: d.Now},
 		cfg:        d.Config, queue: d.Queue, fetch: d.Fetch, limiter: d.Limiter, locker: d.Locker,
-		plans: d.Plans, guard: d.Guard, cookies: d.Cookies, proxies: d.Proxies,
+		plans: d.Plans, guard: d.Guard, cookies: d.Cookies, proxies: d.Proxies, editor: d.Editor,
 	}
 }
 
@@ -296,6 +298,7 @@ func (p *Processor) download(ctx context.Context, job domain.Job, opts ytdlp.Opt
 	key := fmt.Sprintf("%s/%s/%s.%s", job.Source, p.now().UTC().Format("2006/01"), mediaID, ext)
 
 	var size int64
+	posterKey := ""
 	if choice.Single { // one progressive file: yt-dlp stdout → S3, no temp file
 		rc, wait, err := p.fetch.Stream(ctx, infoPath, choice.Spec, opts, onProgress)
 		if err != nil {
@@ -328,6 +331,22 @@ func (p *Processor) download(ctx context.Context, job domain.Job, opts ytdlp.Opt
 		if st.Size() > p.cfg.MaxFilesize {
 			return domain.Media{}, fail(domain.KindTooLarge, "file exceeds the limit")
 		}
+		if p.editor != nil {
+			frame := filepath.Join(dir, "frame.jpg")
+			if err := p.editor.Poster(ctx, path, frame); err != nil {
+				p.log.WarnContext(ctx, "poster extract failed", "err", err)
+			} else if pf, err := os.Open(frame); err != nil { //nolint:gosec // path is inside our temp dir
+				p.log.WarnContext(ctx, "poster open failed", "err", err)
+			} else {
+				pkey := "posters/" + mediaID.String() + ".jpg"
+				if _, perr := p.files.Put(ctx, pkey, pf, -1, "image/jpeg", "poster.jpg"); perr != nil {
+					p.log.WarnContext(ctx, "poster upload failed", "err", perr)
+				} else {
+					posterKey = pkey
+				}
+				_ = pf.Close()
+			}
+		}
 		_ = p.store.SetStage(ctx, job.ID, domain.StageUploading, "")
 		p.progress(ctx, job, domain.Progress{Stage: domain.StageUploading, Pct: 99, DownloadedBytes: st.Size(), TotalBytes: st.Size()}, true)
 		if size, err = p.files.Put(ctx, key, f, st.Size(), mime, name); err != nil {
@@ -338,7 +357,7 @@ func (p *Processor) download(ctx context.Context, job domain.Job, opts ytdlp.Opt
 		ID: mediaID, URLHash: job.URLHash, URL: job.Normalized, Source: job.Source, ExternalID: info.ID,
 		Title: title, DurationSec: int(math.Round(info.Duration)), Width: widthFor(info, choice), Height: choice.Height,
 		FormatID: choice.Spec, ObjectKey: key, SizeBytes: size, MimeType: mime, Thumbnail: info.Thumbnail,
-		ExpiresAt: p.now().Add(p.cfg.Retention),
+		PosterKey: posterKey, ExpiresAt: p.now().Add(p.cfg.Retention),
 	})
 	if err != nil {
 		return domain.Media{}, err

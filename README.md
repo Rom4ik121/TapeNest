@@ -1,6 +1,6 @@
 # TapeNest
 
-Telegram bot plus Mini Apps (WavePlayer, CineNest, MediaHub).
+Telegram bot plus Mini Apps (WavePlayer for music, `#/videos` for downloaded clips).
 
 - Spec: [`AI_DEVELOPMENT_INSTRUCTION.md`](AI_DEVELOPMENT_INSTRUCTION.md)
 - Progress: [`STATUS.md`](STATUS.md)
@@ -15,7 +15,7 @@ make infra-native            # …or without Docker: native PostgreSQL 16 + Redi
 make music-seed              # demo library: 16 CC0 recordings (Musopen via Wikimedia Commons) for Navidrome
 make app-up                  # Docker: + api-gateway, bot-service, download-service/worker, music-service/worker
 make fe-install && make fe-dev   # WavePlayer on :5173 (real gateway + music-service via /api proxy; VITE_USE_MOCKS=music to mock)
-make cn-dev                  # CineNest on :5174/cinenest/ (real auth, cinema mocked)
+make cn-dev                  # leftover CineNest dev server (not linked from the bot)
 make lint test build
 make miniapp-up              # DEV: native infra + music + gateway + bot + download + Vite + ngrok, one public URL
 make miniapp-down
@@ -33,8 +33,7 @@ Layout:
 - `docs/`
 
 Dev routing (a single ngrok URL, see ADR 0005):
-- `/` → WavePlayer (Vite)
-- `/cinenest/` → CineNest (Vite :5174, ADR 0007)
+- `/` → WavePlayer (Vite). Downloaded videos: `/#/videos`
 - `/api/*` → api-gateway :8080 (`/api/v1/stream/*`: signed audio/covers → music-service → Navidrome, ADR 0009)
 - `/tg/webhook` → bot-service :8081
 - `/media/*` → MinIO :9000 (presigned download links, ADR 0008)

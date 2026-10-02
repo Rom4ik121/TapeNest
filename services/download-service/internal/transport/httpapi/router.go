@@ -32,6 +32,8 @@ const (
 	CodeNotFound        = "NOT_FOUND"
 	CodeNotReady        = "NOT_READY"
 	CodeNoPublicURL     = "PUBLIC_LINKS_DISABLED"
+	CodeEditFailed      = "EDIT_FAILED"
+	CodeEditUnavailable = "EDIT_UNAVAILABLE"
 	CodeInternal        = "INTERNAL"
 	CodeUnavailableDeps = "SERVICE_UNAVAILABLE"
 )
@@ -85,6 +87,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/", h.create)
 			r.Get("/", h.list)
 			r.Get("/{id}", h.get)
+			r.Patch("/{id}", h.rename)
+			r.Delete("/{id}", h.remove)
+			r.Post("/{id}/trim", h.trim)
 			r.Get("/{id}/events", h.events)
 			r.Get("/{id}/file", h.file)
 		})

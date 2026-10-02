@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,10 +68,20 @@ type Job struct {
 	ErrorMessage string
 	MediaID      *uuid.UUID
 	Title        string
+	DisplayTitle string // owner rename; empty means Title
+	DeletedAt    *time.Time
 	Chat         *Chat
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	FinishedAt   *time.Time
+}
+
+// VisibleTitle is the name shown to the owner (rename, else the source title).
+func (j Job) VisibleTitle() string {
+	if t := strings.TrimSpace(j.DisplayTitle); t != "" {
+		return t
+	}
+	return strings.TrimSpace(j.Title)
 }
 
 // Media is a stored file, shared by every job with the same canonical URL (dedup).
@@ -89,8 +100,14 @@ type Media struct {
 	SizeBytes   int64
 	MimeType    string
 	Thumbnail   string
+	PosterKey   string // jpeg frame in the media bucket; empty if not extracted yet
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
+}
+
+// OwnedEdit reports a file produced by trim (not a shared source download).
+func (m Media) OwnedEdit() bool {
+	return strings.HasPrefix(m.URL, "edit:")
 }
 
 // Progress of a running job (kept in Redis, streamed via SSE and to the bot).

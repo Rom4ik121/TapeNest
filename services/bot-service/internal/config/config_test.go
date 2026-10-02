@@ -21,6 +21,9 @@ func TestLoad(t *testing.T) {
 	if c.Port != 8081 || c.WebhookPath != "/tg/webhook" || !c.SetupOnStart || c.MenuButton != "WavePlayer" {
 		t.Fatalf("%+v", c)
 	}
+	if c.VideosURL != "https://x.example/#/videos" {
+		t.Fatalf("derived videos url: %s", c.VideosURL)
+	}
 }
 
 func TestValidation(t *testing.T) {
@@ -28,7 +31,7 @@ func TestValidation(t *testing.T) {
 		"short secret":     {"TELEGRAM_WEBHOOK_SECRET", "short"},
 		"bad secret chars": {"TELEGRAM_WEBHOOK_SECRET", "abcdefghijklmnop!!!!"},
 		"http miniapp":     {"MINIAPP_WAVEPLAYER_URL", "http://x.example/"},
-		"http cinenest":    {"MINIAPP_CINENEST_URL", "http://x.example/"},
+		"http videos":      {"MINIAPP_VIDEOS_URL", "http://x.example/"},
 		"no webhook url":   {"TELEGRAM_WEBHOOK_URL", ""},
 		"bad path":         {"TELEGRAM_WEBHOOK_PATH", "tg"},
 		"short internal":   {"INTERNAL_API_TOKEN", "x"},

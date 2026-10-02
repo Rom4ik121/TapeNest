@@ -61,7 +61,7 @@ func msg(text, lang string) telegram.Update {
 }
 
 func TestStartAndHelp(t *testing.T) {
-	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, CineNest: "https://cine.example/"})
+	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, Videos: "https://x.example/#/videos"})
 	ctx := context.Background()
 	for _, tc := range []struct{ text, lang, prefix string }{
 		{"/start", "ru", "Привет, Roma!"},
@@ -82,8 +82,11 @@ func TestStartAndHelp(t *testing.T) {
 			t.Fatalf("%s: reply shape %+v", tc.text, m)
 		}
 		kb := m.ReplyMarkup.InlineKeyboard
-		if len(kb) != 2 || kb[0][0].WebApp == nil || kb[0][0].WebApp.URL != waveURL || kb[1][0].WebApp.URL != "https://cine.example/" {
+		if len(kb) != 2 || kb[0][0].WebApp == nil || kb[0][0].WebApp.URL != waveURL || kb[1][0].WebApp.URL != "https://x.example/#/videos" {
 			t.Fatalf("%s: keyboard %+v", tc.text, kb)
+		}
+		if strings.Contains(m.Text, "CineNest") || strings.Contains(m.Text, "/cinema") {
+			t.Fatalf("cinema must not be offered: %s", m.Text)
 		}
 	}
 	if strings.Contains(s.sent[0].Text, "{sources}") {
@@ -251,30 +254,45 @@ func TestSetup(t *testing.T) {
 	}
 }
 
-func TestCinemaCommand(t *testing.T) {
+func TestVideosNotCinema(t *testing.T) {
 	ctx := context.Background()
-	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, CineNest: "https://x.example/cinenest/"})
-	if cmds := b.Commands(i18n.RU); len(cmds) != 3 || cmds[2].Command != "cinema" || cmds[2].Description == "" {
+	videos := "https://x.example/#/videos"
+	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, Videos: videos})
+	if cmds := b.Commands(i18n.RU); len(cmds) != 3 || cmds[2].Command != "videos" || cmds[2].Description == "" {
 		t.Fatal(cmds)
 	}
-	for _, text := range []string{"/cinema", "/cinenest@tapenest_bot"} {
+	for _, text := range []string{"/videos", "/video@tapenest_bot"} {
 		s.sent = nil
-		if err := b.Handle(ctx, msg(text, "en"), "r"); err != nil {
+		if err := b.Handle(ctx, msg(text, "ru"), "r"); err != nil {
 			t.Fatal(err)
 		}
 		m := s.sent[0]
-		if !strings.HasPrefix(m.Text, "🎬 CineNest") || m.ReplyMarkup == nil {
+		if !strings.Contains(m.Text, "Мои видео") || m.ReplyMarkup == nil {
 			t.Fatalf("%s: %+v", text, m)
 		}
 		kb := m.ReplyMarkup.InlineKeyboard
-		if len(kb) != 1 || kb[0][0].WebApp.URL != "https://x.example/cinenest/" {
+		if len(kb) != 2 || kb[1][0].WebApp.URL != videos {
 			t.Fatalf("%s: keyboard %+v", text, kb)
 		}
 	}
-	// Not configured → plain notice, no button, and no /cinema in the menu.
-	b2, s2, _ := newBot(t, MiniApps{WavePlayer: waveURL})
-	_ = b2.Handle(ctx, msg("/cinema", "ru"), "r")
-	if len(s2.sent) != 1 || s2.sent[0].ReplyMarkup != nil || !strings.Contains(s2.sent[0].Text, "не подключён") {
-		t.Fatalf("%+v", s2.sent)
+	for _, text := range []string{"/cinema", "/cinenest@tapenest_bot", "/film"} {
+		s.sent = nil
+		if err := b.Handle(ctx, msg(text, "ru"), "r"); err != nil {
+			t.Fatal(err)
+		}
+		m := s.sent[0]
+		if strings.Contains(m.Text, "CineNest") || strings.Contains(m.Text, "кинотеатр") {
+			t.Fatalf("cinema surface: %s", m.Text)
+		}
+		if !strings.Contains(m.Text, "больше нет") {
+			t.Fatalf("%s: %+v", text, m.Text)
+		}
+		kb := m.ReplyMarkup.InlineKeyboard
+		if len(kb) != 2 || kb[1][0].WebApp.URL != videos {
+			t.Fatalf("%s: keyboard %+v", text, kb)
+		}
+	}
+	if cmds := b.Commands(i18n.EN); cmds[2].Command == "cinema" {
+		t.Fatal(cmds)
 	}
 }

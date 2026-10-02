@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +58,7 @@ func setup(t *testing.T) *fixture {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	api := service.NewAPI(service.APIDeps{
 		Store: f.store, Queue: q, Bus: f.bus, Files: f.files, Guard: &guard{},
-		Quotas: service.Quotas{Active: 3, Daily: 30}, PresignTTL: time.Hour, Log: log,
+		Quotas: service.Quotas{Active: 3, Daily: 30}, PresignTTL: time.Hour, Editor: bytesEditor{}, Log: log,
 	})
 	f.srv = httptest.NewServer(NewRouter(Deps{
 		API: api, Bus: f.bus, InternalToken: token, Log: log, Ready: f.ready,
@@ -310,6 +311,80 @@ func TestSSE(t *testing.T) {
 		t.Fatal(r.StatusCode)
 	}
 	if r, _ := f.do(t, "GET", "/api/v1/downloads/x/events", "", nil); r.StatusCode != 404 {
+		t.Fatal(r.StatusCode)
+	}
+}
+
+type bytesEditor struct{}
+
+func (bytesEditor) Poster(context.Context, string, string) error { return nil }
+
+func (bytesEditor) Trim(_ context.Context, src, dst string, _, _ time.Duration) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o600)
+}
+
+func TestLibraryHTTP(t *testing.T) {
+	f := setup(t)
+	mediaID := uuid.New()
+	key := "vk/2026/10/" + mediaID.String() + ".mp4"
+	f.files.Objects[key] = []byte("VIDEODATA")
+	f.store.Media[mediaID] = domain.Media{
+		ID: mediaID, URLHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		URL: "https://vk.com/video1", Source: domain.SourceVK, Title: "Ролик", DurationSec: 30,
+		ObjectKey: key, SizeBytes: 9, MimeType: "video/mp4",
+		Thumbnail: "https://cdn.example/poster.jpg", ExpiresAt: time.Now().Add(48 * time.Hour),
+	}
+	jobID := uuid.New()
+	now := time.Now()
+	f.store.Jobs[jobID] = domain.Job{
+		ID: jobID, UserID: f.user, URL: "https://vk.com/video1", Normalized: "https://vk.com/video1",
+		URLHash: f.store.Media[mediaID].URLHash, Source: domain.SourceVK, Status: domain.StatusDone,
+		Title: "Ролик", MediaID: &mediaID, CreatedAt: now, FinishedAt: &now,
+	}
+	path := "/api/v1/downloads/" + jobID.String()
+	r, b := f.do(t, "GET", path, "", nil)
+	if r.StatusCode != 200 || b["title"] != "Ролик" || b["posterUrl"] != "https://cdn.example/poster.jpg" {
+		t.Fatalf("get: %d %+v", r.StatusCode, b)
+	}
+	r, b = f.do(t, "PATCH", path, `{"title":"Новое имя"}`, nil)
+	if r.StatusCode != 200 || b["title"] != "Новое имя" {
+		t.Fatalf("rename: %d %+v", r.StatusCode, b)
+	}
+	if r, b := f.do(t, "PATCH", path, `{"title":"  "}`, nil); r.StatusCode != 400 || b["code"] != CodeInvalid {
+		t.Fatalf("empty title: %d %+v", r.StatusCode, b)
+	}
+	if r, b := f.do(t, "POST", path+"/trim", `{"startSec":0,"endSec":0.4}`, nil); r.StatusCode != 400 {
+		t.Fatalf("bad trim: %d %+v", r.StatusCode, b)
+	}
+	r, b = f.do(t, "POST", path+"/trim", `{"startSec":1,"endSec":5}`, nil)
+	if r.StatusCode != 201 || b["status"] != "done" || b["id"] == jobID.String() {
+		t.Fatalf("trim: %d %+v", r.StatusCode, b)
+	}
+	cutID, _ := b["id"].(string)
+	r, b = f.do(t, "GET", "/api/v1/downloads?limit=10", "", nil)
+	items, _ := b["items"].([]any)
+	if r.StatusCode != 200 || len(items) != 2 {
+		t.Fatalf("list: %d %+v", r.StatusCode, b)
+	}
+	r, _ = f.do(t, "DELETE", path, "", nil)
+	if r.StatusCode != 204 {
+		t.Fatal(r.StatusCode)
+	}
+	if r, b := f.do(t, "GET", path, "", nil); r.StatusCode != 404 || b["code"] != CodeNotFound {
+		t.Fatalf("deleted: %d %+v", r.StatusCode, b)
+	}
+	if _, ok := f.files.Objects[key]; !ok {
+		t.Fatal("source file must remain")
+	}
+	other := uuid.NewString()
+	if r, _ := f.do(t, "DELETE", "/api/v1/downloads/"+cutID, "", map[string]string{"X-User-Id": other}); r.StatusCode != 404 {
+		t.Fatal(r.StatusCode)
+	}
+	if r, _ := f.do(t, "DELETE", "/api/v1/downloads/"+cutID, "", nil); r.StatusCode != 204 {
 		t.Fatal(r.StatusCode)
 	}
 }

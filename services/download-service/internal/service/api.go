@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,12 +19,16 @@ import (
 
 // API errors (mapped to HTTP codes by the transport layer).
 var (
-	ErrQuotaActive   = errors.New("too many active downloads")
-	ErrQuotaDaily    = errors.New("daily download limit reached")
-	ErrForbiddenHost = errors.New("host is not allowed")
-	ErrNotReady      = errors.New("download is not finished")
-	ErrNoPublicURL   = errors.New("public file links are not configured")
-	ErrNotFound      = repo.ErrNotFound
+	ErrQuotaActive     = errors.New("too many active downloads")
+	ErrQuotaDaily      = errors.New("daily download limit reached")
+	ErrForbiddenHost   = errors.New("host is not allowed")
+	ErrNotReady        = errors.New("download is not finished")
+	ErrNoPublicURL     = errors.New("public file links are not configured")
+	ErrNotFound        = repo.ErrNotFound
+	ErrBadTitle        = errors.New("bad title")
+	ErrBadRange        = errors.New("bad trim range")
+	ErrEditFailed      = errors.New("edit failed")
+	ErrEditUnavailable = errors.New("edit unavailable")
 )
 
 // Quotas are per-user limits (ADR 0008).
@@ -39,6 +44,7 @@ type API struct {
 	guard      HostGuard
 	quotas     Quotas
 	presignTTL time.Duration
+	editor     Editor
 }
 
 // APIDeps groups API dependencies.
@@ -50,6 +56,7 @@ type APIDeps struct {
 	Guard      HostGuard
 	Quotas     Quotas
 	PresignTTL time.Duration
+	Editor     Editor
 	Log        *slog.Logger
 	Now        func() time.Time
 }
@@ -61,7 +68,7 @@ func NewAPI(d APIDeps) *API {
 	}
 	return &API{
 		mediaIndex: mediaIndex{store: d.Store, bus: d.Bus, files: d.Files, log: d.Log, now: d.Now},
-		queue:      d.Queue, guard: d.Guard, quotas: d.Quotas, presignTTL: d.PresignTTL,
+		queue:      d.Queue, guard: d.Guard, quotas: d.Quotas, presignTTL: d.PresignTTL, editor: d.Editor,
 	}
 }
 
@@ -143,9 +150,10 @@ func (a *API) Create(ctx context.Context, in CreateInput) (domain.Job, bool, err
 
 // View is a job with live progress and (when done) its file.
 type View struct {
-	Job      domain.Job
-	Progress *domain.Progress
-	File     *domain.Media
+	Job       domain.Job
+	Progress  *domain.Progress
+	File      *domain.Media
+	PosterURL string
 }
 
 // Get returns one job of the user.
@@ -176,9 +184,28 @@ func (a *API) view(ctx context.Context, j domain.Job) (View, error) {
 		}
 		if err == nil {
 			v.File = &m
+			v.PosterURL = a.posterURL(ctx, &m)
 		}
 	}
 	return v, nil
+}
+
+func (a *API) posterURL(ctx context.Context, m *domain.Media) string {
+	if m == nil {
+		return ""
+	}
+	if m.PosterKey != "" {
+		u, err := a.files.PresignInline(ctx, m.PosterKey, a.presignTTL)
+		if err != nil {
+			a.log.WarnContext(ctx, "presign poster failed", "err", err)
+		} else if u != "" {
+			return u
+		}
+	}
+	if strings.HasPrefix(m.Thumbnail, "https://") || strings.HasPrefix(m.Thumbnail, "http://") {
+		return m.Thumbnail
+	}
+	return ""
 }
 
 // List returns the user's jobs, newest first (keyset pagination).
@@ -207,7 +234,11 @@ func (a *API) FileURL(ctx context.Context, userID, id uuid.UUID) (string, error)
 	if v.Job.Status != domain.StatusDone || v.File == nil || v.File.ExpiresAt.Before(a.now()) {
 		return "", ErrNotReady
 	}
-	u, err := a.files.PresignPublic(ctx, v.File.ObjectKey, FileName(v.File.Title, v.File.ExternalID, v.File.MimeType), a.presignTTL)
+	name := v.Job.VisibleTitle()
+	if name == "" {
+		name = v.File.Title
+	}
+	u, err := a.files.PresignPublic(ctx, v.File.ObjectKey, FileName(name, v.File.ExternalID, v.File.MimeType), a.presignTTL)
 	if err != nil {
 		return "", err
 	}
