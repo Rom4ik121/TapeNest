@@ -29,6 +29,7 @@ type Downloader interface {
 type MiniApps struct {
 	WavePlayer string
 	CineNest   string // optional
+	MediaHub   string // optional «Мои видео»
 }
 
 // Bot handles updates.
@@ -54,12 +55,21 @@ func (b *Bot) Commands(l i18n.Lang) []telegram.BotCommand {
 	if b.apps.CineNest != "" {
 		cmds = append(cmds, telegram.BotCommand{Command: "cinema", Description: b.texts.T(l, "commands.cinema")})
 	}
+	if b.apps.MediaHub != "" {
+		cmds = append(cmds, telegram.BotCommand{Command: "videos", Description: b.texts.T(l, "commands.videos")})
+	}
 	return cmds
 }
 
 func (b *Bot) cinemaKeyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
 	return &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{
 		{Text: b.texts.T(l, "button.cinenest"), WebApp: &telegram.WebAppInfo{URL: b.apps.CineNest}},
+	}}}
+}
+
+func (b *Bot) videosKeyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{
+		{Text: b.texts.T(l, "button.videos"), WebApp: &telegram.WebAppInfo{URL: b.apps.MediaHub}},
 	}}}
 }
 
@@ -70,6 +80,11 @@ func (b *Bot) keyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
 	if b.apps.CineNest != "" {
 		rows = append(rows, []telegram.InlineKeyboardButton{
 			{Text: b.texts.T(l, "button.cinenest"), WebApp: &telegram.WebAppInfo{URL: b.apps.CineNest}},
+		})
+	}
+	if b.apps.MediaHub != "" {
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: b.texts.T(l, "button.videos"), WebApp: &telegram.WebAppInfo{URL: b.apps.MediaHub}},
 		})
 	}
 	return &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -120,6 +135,11 @@ func (b *Bot) command(ctx context.Context, m *telegram.Message, lang i18n.Lang, 
 			return b.reply(ctx, m, b.texts.T(lang, "cinema.unavailable"), false)
 		}
 		return b.send(ctx, m, b.texts.T(lang, "cinema.open"), b.cinemaKeyboard(lang))
+	case "videos", "mediahub":
+		if b.apps.MediaHub == "" {
+			return b.reply(ctx, m, b.texts.T(lang, "videos.unavailable"), false)
+		}
+		return b.send(ctx, m, b.texts.T(lang, "videos.open"), b.videosKeyboard(lang))
 	default:
 		return b.reply(ctx, m, b.texts.T(lang, "command.unknown"), false)
 	}

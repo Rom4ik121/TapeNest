@@ -387,6 +387,12 @@ func TestUpstreamRouting(t *testing.T) {
 	if r := e.do(t, "GET", "/api/v1/cinema/titles", nil, bearer(tok.AccessToken)); r.status != 501 || r.body["service"] != "streaming" {
 		t.Fatalf("streaming 501: %d", r.status)
 	}
+	if r := e.do(t, "GET", "/api/v1/video/projects", nil, bearer(tok.AccessToken)); r.status != 501 || r.body["service"] != "video" {
+		t.Fatalf("video 501: %d %s", r.status, r.raw)
+	}
+	if r := e.do(t, "GET", "/api/v1/photos", nil, bearer(tok.AccessToken)); r.status != 501 || r.body["service"] != "photo" {
+		t.Fatalf("photo 501: %d %s", r.status, r.raw)
+	}
 	// Configured but down → 503 SERVICE_UNAVAILABLE, then the breaker opens.
 	music.Close()
 	for i := 0; i < 3; i++ {

@@ -274,6 +274,28 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, page)
 }
 
+// source is the internal seam for video-editor-service: object key of a finished download.
+func (h *handlers) source(w http.ResponseWriter, r *http.Request) {
+	user, err := uuid.Parse(r.Header.Get("X-User-Id"))
+	if err != nil || user == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, CodeUnauthorized, "missing user identity")
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	src, err := h.d.API.SourceOf(r.Context(), user, id)
+	if err != nil {
+		h.serviceError(w, r, "source", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"objectKey": src.ObjectKey, "title": src.Title, "durationSec": src.DurationSec,
+		"width": src.Width, "height": src.Height, "mimeType": src.MimeType, "sizeBytes": src.SizeBytes,
+	})
+}
+
 // file: 302 to a presigned link (TTL ≤ 1 h); ?redirect=false returns JSON.
 func (h *handlers) file(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)

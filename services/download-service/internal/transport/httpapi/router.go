@@ -80,6 +80,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireInternal)
 		r.Post("/internal/v1/downloads", h.createInternal)
+		r.Get("/internal/v1/downloads/{id}/source", h.source)
 		r.Route("/api/v1/downloads", func(r chi.Router) {
 			r.Use(h.requireUser)
 			r.Post("/", h.create)

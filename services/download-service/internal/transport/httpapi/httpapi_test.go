@@ -313,3 +313,29 @@ func TestSSE(t *testing.T) {
 		t.Fatal(r.StatusCode)
 	}
 }
+
+func TestSource(t *testing.T) {
+	f := setup(t)
+	mid := uuid.New()
+	f.store.Media[mid] = domain.Media{
+		ID: mid, ObjectKey: "media/a.mp4", Title: "Clip", DurationSec: 9, Width: 320, Height: 180,
+		MimeType: "video/mp4", SizeBytes: 12, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	jid := uuid.New()
+	f.store.Jobs[jid] = domain.Job{ID: jid, UserID: f.user, Status: domain.StatusDone, MediaID: &mid, CreatedAt: time.Now()}
+	r, b := f.do(t, "GET", "/internal/v1/downloads/"+jid.String()+"/source", "", nil)
+	if r.StatusCode != 200 || b["objectKey"] != "media/a.mp4" || b["durationSec"] != float64(9) {
+		t.Fatal(r.StatusCode, b)
+	}
+	qid := uuid.New()
+	f.store.Jobs[qid] = domain.Job{ID: qid, UserID: f.user, Status: domain.StatusQueued, CreatedAt: time.Now()}
+	if r, b := f.do(t, "GET", "/internal/v1/downloads/"+qid.String()+"/source", "", nil); r.StatusCode != 409 || b["code"] != CodeNotReady {
+		t.Fatal(r.StatusCode, b)
+	}
+	if r, _ := f.do(t, "GET", "/internal/v1/downloads/"+jid.String()+"/source", "", map[string]string{"X-User-Id": ""}); r.StatusCode != 401 {
+		t.Fatal(r.StatusCode)
+	}
+	if r, _ := f.do(t, "GET", "/internal/v1/downloads/"+uuid.NewString()+"/source", "", nil); r.StatusCode != 404 {
+		t.Fatal(r.StatusCode)
+	}
+}

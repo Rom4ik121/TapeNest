@@ -16,6 +16,7 @@ make music-seed              # demo library: 16 CC0 recordings (Musopen via Wiki
 make app-up                  # Docker: + api-gateway, bot-service, download-service/worker, music-service/worker
 make fe-install && make fe-dev   # WavePlayer on :5173 (real gateway + music-service via /api proxy; VITE_USE_MOCKS=music to mock)
 make cn-dev                  # CineNest on :5174/cinenest/ (real auth, cinema mocked)
+make mh-dev                  # MediaHub «Мои видео» on :5175/mediahub/
 make lint test build
 make miniapp-up              # DEV: native infra + music + gateway + bot + download + Vite + ngrok, one public URL
 make miniapp-down
@@ -27,7 +28,7 @@ Layout:
   - [`bot-service`](services/bot-service/README.md)
   - [`download-service`](services/download-service/README.md) (API + worker, yt-dlp → MinIO)
   - [`music-service`](services/music-service/README.md) (API + worker: catalog from Navidrome, signed streaming, likes, playlists, wave, listens)
-- `apps/*`: React mini apps — [`waveplayer`](apps/waveplayer/README.md), [`cinenest`](apps/cinenest/README.md)
+- `apps/*`: React mini apps — [`waveplayer`](apps/waveplayer/README.md), [`cinenest`](apps/cinenest/README.md), [`mediahub`](apps/mediahub/README.md)
 - `deploy/`: compose, pg, nginx, prometheus, grafana, k8s
 - `tools/`: initdata-mock, dev stack scripts, CI helpers, cookie-refresher
 - `docs/`
@@ -35,6 +36,7 @@ Layout:
 Dev routing (a single ngrok URL, see ADR 0005):
 - `/` → WavePlayer (Vite)
 - `/cinenest/` → CineNest (Vite :5174, ADR 0007)
+- `/mediahub/` → «Мои видео» (Vite :5175, ADR 0014): edit a downloaded video, or your own photos
 - `/api/*` → api-gateway :8080 (`/api/v1/stream/*`: signed audio/covers → music-service → Navidrome, ADR 0009)
 - `/tg/webhook` → bot-service :8081
 - `/media/*` → MinIO :9000 (presigned download links, ADR 0008)

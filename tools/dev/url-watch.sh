@@ -15,6 +15,8 @@ while true; do
     echo "$(date -Is) ngrok URL changed → re-registering bot ($cur)"
     start_bot "$cur" || echo "$(date -Is) bot restart failed"
     start_download "$cur" || echo "$(date -Is) download-service restart failed"
+    start_video_editor "$cur" || echo "$(date -Is) video-editor restart failed"
+    start_photo_editor "$cur" || echo "$(date -Is) photo-editor restart failed"
   elif ! is_running bot-service && [[ -n "$cur" ]]; then
     echo "$(date -Is) bot-service not running → restarting"
     start_bot "$cur" || echo "$(date -Is) bot restart failed"

@@ -1,0 +1,161 @@
+openapi: 3.0.3
+info:
+  title: TapeNest photo editor
+  version: 0.1.0
+  description: |
+    The user's own photos inside «Мои видео». Reachable only through api-gateway
+    (`/api/v1/photos/*`), which adds `X-Internal-Token` and `X-User-Id`.
+servers:
+  - url: /api/v1
+paths:
+  /photos:
+    post:
+      operationId: uploadPhoto
+      summary: Upload a JPEG or PNG (max 15 MB, edge 1..4096)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                title: { type: string }
+      responses:
+        "201":
+          description: Stored photo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Photo" }
+    get:
+      operationId: listPhotos
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Page, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Photo" }
+                  nextCursor: { type: string, nullable: true }
+  /photos/{id}:
+    get:
+      operationId: getPhoto
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Photo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Photo" }
+    delete:
+      operationId: deletePhoto
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Removed }
+  /photos/{id}/file:
+    get:
+      operationId: photoFile
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: redirect
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: JSON url when redirect=false }
+        "302": { description: Presigned original }
+  /photos/{id}/exports:
+    post:
+      operationId: exportPhoto
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipe]
+              properties:
+                recipe: { $ref: "#/components/schemas/Recipe" }
+      responses:
+        "200":
+          description: Rendered export
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Export" }
+  /photos/exports/{id}/file:
+    get:
+      operationId: photoExportFile
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: redirect
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: JSON url when redirect=false }
+        "302": { description: Presigned export }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Crop:
+      type: object
+      properties:
+        x: { type: number }
+        y: { type: number }
+        w: { type: number }
+        h: { type: number }
+    Text:
+      type: object
+      properties:
+        text: { type: string }
+        x: { type: number }
+        y: { type: number }
+        size: { type: number }
+        color: { type: string }
+    Recipe:
+      type: object
+      properties:
+        crop: { $ref: "#/components/schemas/Crop" }
+        rotate: { type: integer, enum: [0, 90, 180, 270] }
+        straighten: { type: number }
+        exposure: { type: number }
+        contrast: { type: number }
+        saturation: { type: number }
+        temperature: { type: number }
+        filter: { type: string, enum: [none, vivid, mono, warm, cool, fade] }
+        text: { $ref: "#/components/schemas/Text" }
+        format: { type: string, enum: [jpeg, png] }
+    Photo:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        mimeType: { type: string }
+        sizeBytes: { type: integer }
+        createdAt: { type: string, format: date-time }
+    Export:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        mimeType: { type: string }

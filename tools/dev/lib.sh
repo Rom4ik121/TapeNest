@@ -68,6 +68,9 @@ start_infra() { "$ROOT/tools/dev/infra-native.sh" up; }
 start_gateway() {
   stop_proc api-gateway
   build_go api-gateway
+  # An empty value in .env does not expand ${VAR:-default}.
+  [[ -z "${VIDEO_EDITOR_URL:-}" ]] && export VIDEO_EDITOR_URL="http://127.0.0.1:${VIDEO_EDITOR_PORT:-8096}"
+  [[ -z "${PHOTO_EDITOR_URL:-}" ]] && export PHOTO_EDITOR_URL="http://127.0.0.1:${PHOTO_EDITOR_PORT:-8098}"
   spawn api-gateway "$BIN_DIR/api-gateway"
   wait_http "http://127.0.0.1:${API_GATEWAY_PORT:-8080}/readyz" 20 || { echo "api-gateway not ready, see $LOG_DIR/api-gateway.log" >&2; return 1; }
   echo "api-gateway up (pid $(pid_of api-gateway))"
@@ -115,6 +118,7 @@ start_bot() {
   stop_proc bot-service
   build_go bot-service
   TELEGRAM_WEBHOOK_URL="$url/tg/webhook" MINIAPP_WAVEPLAYER_URL="$url/" MINIAPP_CINENEST_URL="$url/cinenest/" \
+    MINIAPP_MEDIAHUB_URL="$url/mediahub/" \
     spawn bot-service "$BIN_DIR/bot-service"
   wait_http "http://127.0.0.1:${BOT_SERVICE_PORT:-8081}/readyz" 30 || { echo "bot-service not ready, see $LOG_DIR/bot-service.log" >&2; return 1; }
   echo "$url" >"$LOG_DIR/miniapp-url.txt"
@@ -209,4 +213,40 @@ start_streaming() {
   MIGRATE_ON_START=false spawn streaming-worker "$BIN_DIR/streaming-worker"
   wait_http "http://127.0.0.1:${STREAMING_WORKER_PORT:-8095}/healthz" 20 || { echo "streaming-worker not ready, see $LOG_DIR/streaming-worker.log" >&2; return 1; }
   echo "streaming-service up (pid $(pid_of streaming-service)), worker pid $(pid_of streaming-worker)"
+}
+
+# video-editor-service API :8096 + worker (health :8097). Presign embeds S3_PUBLIC_URL.
+start_video_editor() {
+  local url="$1"
+  stop_proc video-editor-worker
+  stop_proc video-editor-service
+  build_go video-editor-service server video-editor-service
+  build_go video-editor-service worker video-editor-worker
+  DOWNLOAD_SERVICE_URL="http://127.0.0.1:${DOWNLOAD_SERVICE_PORT:-8082}" S3_PUBLIC_URL="$url" \
+    spawn video-editor-service "$BIN_DIR/video-editor-service"
+  wait_http "http://127.0.0.1:${VIDEO_EDITOR_PORT:-8096}/readyz" 40 || { echo "video-editor-service not ready, see $LOG_DIR/video-editor-service.log" >&2; return 1; }
+  DOWNLOAD_SERVICE_URL="http://127.0.0.1:${DOWNLOAD_SERVICE_PORT:-8082}" S3_PUBLIC_URL="$url" MIGRATE_ON_START=false \
+    spawn video-editor-worker "$BIN_DIR/video-editor-worker"
+  wait_http "http://127.0.0.1:${VIDEO_EDITOR_WORKER_PORT:-8097}/healthz" 20 || { echo "video-editor-worker not ready, see $LOG_DIR/video-editor-worker.log" >&2; return 1; }
+  echo "video-editor-service up (pid $(pid_of video-editor-service)), worker pid $(pid_of video-editor-worker)"
+}
+
+# photo-editor-service API :8098. Presign embeds S3_PUBLIC_URL.
+start_photo_editor() {
+  local url="$1"
+  stop_proc photo-editor-service
+  build_go photo-editor-service server photo-editor-service
+  S3_PUBLIC_URL="$url" spawn photo-editor-service "$BIN_DIR/photo-editor-service"
+  wait_http "http://127.0.0.1:${PHOTO_EDITOR_PORT:-8098}/readyz" 40 || { echo "photo-editor-service not ready, see $LOG_DIR/photo-editor-service.log" >&2; return 1; }
+  echo "photo-editor-service up (pid $(pid_of photo-editor-service))"
+}
+
+start_mediahub() {
+  stop_proc mediahub
+  local host="${1:-}"
+  (cd "$ROOT/apps/mediahub" && { [[ -d node_modules ]] || npm ci; } &&
+    VITE_DEV_PUBLIC_HOST="$host" GATEWAY_URL="http://127.0.0.1:${API_GATEWAY_PORT:-8080}" \
+    spawn mediahub npx vite --port "${MEDIAHUB_PORT:-5175}" --strictPort)
+  wait_http "http://127.0.0.1:${MEDIAHUB_PORT:-5175}/mediahub/" 40 || { echo "mediahub not ready" >&2; return 1; }
+  echo "mediahub up (pid $(pid_of mediahub))"
 }
