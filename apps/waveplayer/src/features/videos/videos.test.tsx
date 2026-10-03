@@ -93,6 +93,41 @@ describe('video library', () => {
     expect(screen.getByText(/2026/)).toBeInTheDocument();
   });
 
+  it('does not show a failed download without a file as a video card', async () => {
+    api.list.mockResolvedValue({
+      items: [
+        job(),
+        job({
+          id: 'failed-empty',
+          title: '',
+          status: 'failed',
+          posterUrl: undefined,
+          file: undefined,
+          finishedAt: undefined,
+        }),
+        job({
+          id: 'queued',
+          title: '',
+          status: 'queued',
+          posterUrl: undefined,
+          file: undefined,
+          url: 'https://vimeo.com/123',
+          source: 'vimeo',
+          finishedAt: undefined,
+        }),
+      ],
+      nextCursor: null,
+    });
+    renderLibrary();
+    expect(await screen.findByText('Домашний клип')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Открыть «Домашний клип»' })).toBeInTheDocument();
+    expect(screen.queryByText('Без названия')).not.toBeInTheDocument();
+    expect(screen.queryByText('Не скачалось')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /queued|Без названия|vimeo/i })).not.toBeInTheDocument();
+    expect(screen.getByText('В очереди')).toBeInTheDocument();
+    expect(screen.getByText('vimeo.com')).toBeInTheDocument();
+  });
+
   it('shows an empty library and a useful error for a bad link', async () => {
     api.list.mockResolvedValue({ items: [], nextCursor: null });
     api.create.mockRejectedValue(new ApiError(400, 'bad', 'UNSUPPORTED_SOURCE'));

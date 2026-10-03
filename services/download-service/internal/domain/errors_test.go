@@ -58,8 +58,8 @@ func TestPlan(t *testing.T) {
 	if Plan(KindGeoBlocked, 3).Retry {
 		t.Fatal("geo retries twice at most")
 	}
-	if b := Plan(KindBotCheck, 2); !b.Next.WithCookies || !b.Next.NewProxy || b.Next.Tier != TierResidential {
-		t.Fatalf("bot check: %+v", b)
+	if Plan(KindBotCheck, 1).Retry || Plan(KindBotCheck, 2).Retry {
+		t.Fatal("bot check is reported immediately")
 	}
 	if r := Plan(KindRateLimited, 2); !r.Next.NewProxy || r.Next.Delay != 30*time.Second {
 		t.Fatalf("429: %+v", r)

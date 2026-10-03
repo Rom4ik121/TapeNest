@@ -80,6 +80,9 @@ func (s *MemStore) ListUserJobs(_ context.Context, userID uuid.UUID, after *repo
 		if j.UserID != userID || j.DeletedAt != nil {
 			continue
 		}
+		if j.Status == domain.StatusFailed && j.MediaID == nil {
+			continue
+		}
 		if after == nil || j.CreatedAt.Before(after.CreatedAt) {
 			out = append(out, j)
 		}

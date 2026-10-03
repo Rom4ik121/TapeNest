@@ -61,6 +61,9 @@ func NormalizeURL(raw string) (Normalized, error) {
 	if s == "" || len(s) > 2048 {
 		return Normalized{}, ErrInvalidURL
 	}
+	if strings.HasPrefix(strings.ToLower(s), "magnet:") {
+		return Normalized{}, ErrUnsupported
+	}
 	if !strings.Contains(s, "://") {
 		s = "https://" + s
 	}
@@ -97,6 +100,13 @@ func NormalizeURL(raw string) (Normalized, error) {
 		return vk(segs, q)
 	case "rutube.ru", "m.rutube.ru":
 		return rutube(segs, q)
+	default:
+		if blockedHost(host) {
+			return Normalized{}, ErrUnsupported
+		}
+		if src, ok := publicSource(host); ok {
+			return genericVideo(host, src, path, q)
+		}
 	}
 	return Normalized{}, ErrUnsupported
 }

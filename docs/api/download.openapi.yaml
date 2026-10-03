@@ -3,7 +3,7 @@ info:
   title: TapeNest download-service
   version: 0.4.0
   description: |
-    Stage 2 — downloads of public videos from YouTube, VK Video and RuTube (yt-dlp + ffmpeg),
+    Stage 2 — downloads of a public video the user pasted (YouTube, VK, RuTube, TikTok, Vimeo and other hosts yt-dlp already supports; no torrent index, no cinema catalog) (yt-dlp + ffmpeg),
     stored in MinIO (bucket `media`, retention `MEDIA_RETENTION`, default 7 days).
 
     * Public clients call the **gateway** (`/api/v1/downloads*`, bearer JWT); the gateway

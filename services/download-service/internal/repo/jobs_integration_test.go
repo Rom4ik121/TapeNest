@@ -117,22 +117,31 @@ func TestJobLifecycle(t *testing.T) {
 		t.Fatal("no active job")
 	}
 
-	// failed job + keyset pagination
+	// a failed download with no file is not a library row; keyset still pages the rest
 	j2, _ := s.InsertJob(ctx, domain.Job{
 		ID: uuid.New(), UserID: user, URL: "u", Normalized: "u", URLHash: hash, Source: domain.SourceVK,
 		Status: domain.StatusQueued, Priority: domain.PriorityNormal,
 	})
 	f, err := s.FinishFailed(ctx, j2.ID, domain.KindPrivate, "private")
-	if err != nil || f.Status != domain.StatusFailed || f.Chat != nil {
+	if err != nil || f.Status != domain.StatusFailed || f.Chat != nil || f.MediaID != nil {
 		t.Fatal(f, err)
 	}
+	queued, _ := s.InsertJob(ctx, domain.Job{
+		ID: uuid.New(), UserID: user, URL: "u2", Normalized: "u2", URLHash: hash + "b", Source: domain.SourceVK,
+		Status: domain.StatusQueued, Priority: domain.PriorityNormal,
+	})
 	page, err := s.ListUserJobs(ctx, user, nil, 1)
-	if err != nil || len(page) != 1 || page[0].ID != j2.ID {
+	if err != nil || len(page) != 1 || page[0].ID != queued.ID {
 		t.Fatal(page, err)
 	}
 	page2, err := s.ListUserJobs(ctx, user, &Cursor{CreatedAt: page[0].CreatedAt, ID: page[0].ID}, 10)
 	if err != nil || len(page2) != 1 || page2[0].ID != j.ID {
 		t.Fatal(page2, err)
+	}
+	for _, row := range append(page, page2...) {
+		if row.ID == j2.ID {
+			t.Fatal("failed job without a file must not be listed")
+		}
 	}
 	_, _ = pool.Exec(ctx, "UPDATE download.media SET expires_at = now() - interval '1 minute' WHERE id = $1", m.ID)
 	if _, err := s.GetMediaByHash(ctx, hash); !errors.Is(err, ErrNotFound) {

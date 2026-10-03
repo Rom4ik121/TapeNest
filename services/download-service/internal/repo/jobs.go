@@ -110,6 +110,7 @@ type Cursor struct {
 }
 
 // ListUserJobs returns up to limit jobs older than the cursor, newest first.
+// A failed job with no media row is omitted: it is not a library video.
 func (s *Store) ListUserJobs(ctx context.Context, userID uuid.UUID, after *Cursor, limit int) ([]domain.Job, error) {
 	p := db.ListUserJobsParams{UserID: userID, Lim: int32(limit)} //nolint:gosec // limit is clamped by the caller
 	if after != nil {

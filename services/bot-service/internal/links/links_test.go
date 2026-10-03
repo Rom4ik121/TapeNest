@@ -1,6 +1,7 @@
 package links
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf16"
 
@@ -23,6 +24,20 @@ func TestClassify(t *testing.T) {
 		"https://vk.ru/clip-1_2":                        VK,
 		"https://rutube.ru/video/abc/":                  RuTube,
 		"https://www.rutube.ru/video/abc/":              RuTube,
+		"https://www.tiktok.com/@u/video/1":             TikTok,
+		"https://vm.tiktok.com/ZMabc/":                  TikTok,
+		"https://vimeo.com/123":                         Vimeo,
+		"https://dai.ly/x7abc":                          Dailymotion,
+		"https://www.instagram.com/reel/AbC/":           Instagram,
+		"https://x.com/u/status/1":                      X,
+		"https://twitter.com/u/status/1":                X,
+		"https://www.twitch.tv/videos/9":                Twitch,
+		"https://clips.twitch.tv/SomeClip":              Twitch,
+		"https://ok.ru/video/1":                         OK,
+		"https://www.reddit.com/r/videos/comments/abc":  Reddit,
+		"https://t.me/channel/1":                        Telegram,
+		"https://rutracker.org/forum/viewtopic.php?t=1": "",
+		"https://www.kinopoisk.ru/film/1/":              "",
 		"https://example.com/watch":                     "",
 		"https://notyoutube.com/watch?v=x":              "",
 		"https://youtube.com.evil.example/watch?v=x":    "",
@@ -86,7 +101,8 @@ func TestFindRegexFallbackAndDedupe(t *testing.T) {
 	if len(Find("no links here", nil)) != 0 {
 		t.Fatal("no links expected")
 	}
-	if SourceNames() != "YouTube, VK, RuTube" {
-		t.Fatal(SourceNames())
+	names := SourceNames()
+	if !strings.HasPrefix(names, "YouTube, VK, RuTube, TikTok") || !strings.Contains(names, "Vimeo") {
+		t.Fatal(names)
 	}
 }

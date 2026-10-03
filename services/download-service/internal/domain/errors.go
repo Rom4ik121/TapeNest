@@ -117,12 +117,10 @@ func Plan(kind ErrorKind, attempt int) Strategy {
 		}
 		return Strategy{Retry: true, Next: Attempt{Tier: TierResidential, NewProxy: true, Delay: time.Second}}
 	case KindBotCheck:
-		a := ladder()
-		a.WithCookies, a.NewProxy = true, true
-		if a.Tier == TierDatacenter && attempt >= 2 {
-			a.Tier = TierResidential
-		}
-		return Strategy{Retry: true, Next: a}
+		// The user is waiting on the ack. Climbing the proxy ladder here keeps
+		// the chat on «проверяю» for minutes. Cookies are still passed on the
+		// attempt itself when a jar is stored; a bot wall is reported at once.
+		return Strategy{}
 	case KindRateLimited:
 		a := ladder()
 		a.NewProxy = true

@@ -86,7 +86,7 @@ func (h *handlers) serviceError(w http.ResponseWriter, r *http.Request, op strin
 	case errors.Is(err, domain.ErrInvalidURL):
 		writeError(w, http.StatusBadRequest, CodeInvalidURL, "not a video URL")
 	case errors.Is(err, domain.ErrUnsupported):
-		writeError(w, http.StatusBadRequest, CodeUnsupported, "supported sources: YouTube, VK, RuTube")
+		writeError(w, http.StatusBadRequest, CodeUnsupported, "supported sources: "+domain.HostSummary())
 	case errors.Is(err, domain.ErrPlaylist):
 		writeError(w, http.StatusBadRequest, CodePlaylist, "playlists are not supported, send a single video")
 	case errors.Is(err, service.ErrForbiddenHost):

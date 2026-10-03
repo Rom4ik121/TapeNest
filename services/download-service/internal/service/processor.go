@@ -27,13 +27,14 @@ const mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWe
 
 // ProcessorConfig are worker limits.
 type ProcessorConfig struct {
-	Limits      domain.Limits
-	MaxFilesize int64
-	MaxDuration time.Duration
-	JobTimeout  time.Duration
-	Retention   time.Duration
-	PresignTTL  time.Duration
-	TmpDir      string
+	Limits       domain.Limits
+	MaxFilesize  int64
+	MaxDuration  time.Duration
+	JobTimeout   time.Duration
+	ProbeTimeout time.Duration // metadata only; the file download uses JobTimeout
+	Retention    time.Duration
+	PresignTTL   time.Duration
+	TmpDir       string
 	// delays for "come back later" situations (not counted as attempts)
 	LockedDelay time.Duration // same URL is being downloaded by another worker
 	BusyDelay   time.Duration // per-domain semaphore is full
@@ -83,6 +84,9 @@ func NewProcessor(d ProcessorDeps) *Processor {
 	}
 	if d.Config.BusyDelay == 0 {
 		d.Config.BusyDelay = 3 * time.Second
+	}
+	if d.Config.ProbeTimeout <= 0 {
+		d.Config.ProbeTimeout = 12 * time.Second
 	}
 	return &Processor{
 		mediaIndex: mediaIndex{store: d.Store, bus: d.Bus, files: d.Files, log: d.Log, now: d.Now},
@@ -172,14 +176,14 @@ func (p *Processor) Process(ctx context.Context, id uuid.UUID) error {
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	opts := ytdlp.Opts{Proxy: proxyURL, MaxFilesize: p.cfg.MaxFilesize}
-	if plan.WithCookies {
-		if jar, ok, err := p.cookies.WriteFile(jctx, job.Source, dir); err != nil {
-			log.WarnContext(ctx, "cookies unavailable", "err", err)
-		} else if ok {
-			opts.CookiesFile = jar.Path
-			if jar.Stale {
-				log.WarnContext(ctx, "cookies are stale", "age", jar.Age.String()) // alert (spec: > 12 h)
-			}
+	// A stored jar (YouTube cookies included) is applied on the first check,
+	// not only after a failure. Missing cookies are a no-op.
+	if jar, ok, err := p.cookies.WriteFile(jctx, job.Source, dir); err != nil {
+		log.WarnContext(ctx, "cookies unavailable", "err", err)
+	} else if ok {
+		opts.CookiesFile = jar.Path
+		if jar.Stale {
+			log.WarnContext(ctx, "cookies are stale", "age", jar.Age.String()) // alert (spec: > 12 h)
 		}
 	}
 	if plan.MobileUA {
@@ -261,8 +265,16 @@ func (p *Processor) download(ctx context.Context, job domain.Job, opts ytdlp.Opt
 		return domain.Media{}, fail(domain.KindNetwork, err.Error())
 	}
 	infoPath := filepath.Join(dir, "info.json")
-	info, err := p.fetch.Probe(ctx, job.Normalized, opts, infoPath)
+	pctx, cancel := context.WithTimeout(ctx, p.cfg.ProbeTimeout)
+	defer cancel()
+	info, err := p.fetch.Probe(pctx, job.Normalized, opts, infoPath)
 	if err != nil {
+		if ctx.Err() != nil {
+			return domain.Media{}, err
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return domain.Media{}, fail(domain.KindNetwork, "metadata timeout")
+		}
 		return domain.Media{}, ytErr(err)
 	}
 	switch {

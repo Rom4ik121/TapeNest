@@ -1,4 +1,5 @@
-export type VideoSource = 'youtube' | 'vk' | 'rutube';
+/** Site slug from the download service (youtube, vk, rutube, tiktok, …). */
+export type VideoSource = string;
 export type VideoStatus = 'queued' | 'running' | 'done' | 'failed';
 
 export interface VideoFile {

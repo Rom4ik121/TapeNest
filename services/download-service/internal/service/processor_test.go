@@ -267,6 +267,62 @@ func TestProcessShutdownRequeues(t *testing.T) {
 	}
 }
 
+func TestProcessBotCheckFailsFast(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	t.Setenv("FAKE_YTDLP_MODE", "fail:[youtube] abc: Sign in to confirm you're not a bot. Use --cookies")
+	j := queued(t, e, zoo, &domain.Chat{ChatID: 1, Lang: "ru"})
+	if err := e.proc.Process(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := e.store.Job(j.ID)
+	if got.Status != domain.StatusFailed || got.ErrorKind != domain.KindBotCheck || got.Attempts != 1 {
+		t.Fatalf("job = %+v", got)
+	}
+	evs := e.events(t)
+	if last := evs[len(evs)-1]; last.Type != mq.EventFailed || last.ErrorKind != domain.KindBotCheck {
+		t.Fatalf("event = %+v", last)
+	}
+	if d, _ := e.queue.Depth(ctx); d["delayed"] != 0 || d["low"] != 0 {
+		t.Fatalf("bot check must not be retried: depth = %v", d)
+	}
+}
+
+func TestProcessUsesStoredCookiesOnFirstAttempt(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	args := filepath.Join(t.TempDir(), "args")
+	t.Setenv("FAKE_YTDLP_ARGS", args)
+	e.rdb.Set(ctx, "cookies:youtube", "# Netscape HTTP Cookie File\n", 0)
+	e.rdb.Set(ctx, "cookies:youtube:updated_at", time.Now().Unix(), 0)
+	j := queued(t, e, zoo, nil)
+	if err := e.proc.Process(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(args)
+	if !contains(string(raw), "--cookies") {
+		t.Fatalf("stored cookies must still be passed:\n%s", raw)
+	}
+}
+
+func TestProcessMetadataTimeout(t *testing.T) {
+	e := newEnv(t)
+	e.proc.cfg.ProbeTimeout = 200 * time.Millisecond
+	t.Setenv("FAKE_YTDLP_MODE", "slow")
+	j := queued(t, e, zoo, &domain.Chat{ChatID: 1})
+	start := time.Now()
+	if err := e.proc.Process(context.Background(), j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("metadata probe hung past the short timeout")
+	}
+	got := e.store.Job(j.ID)
+	if got.Status != domain.StatusQueued || got.ErrorKind != domain.KindNetwork {
+		t.Fatalf("job = %+v", got)
+	}
+}
+
 func TestProgressFnThrottles(t *testing.T) {
 	e := newEnv(t)
 	now := time.Now()

@@ -12,6 +12,44 @@ import (
 	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 )
 
+func TestListSkipsFailedWithoutFile(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	user := uuid.New()
+	now := time.Now()
+	mediaID := uuid.New()
+	doneID, failedID, queuedID := uuid.New(), uuid.New(), uuid.New()
+	e.store.Media[mediaID] = domain.Media{
+		ID: mediaID, Title: "Клип", ObjectKey: "k", MimeType: "video/mp4", ExpiresAt: now.Add(time.Hour),
+	}
+	e.store.Jobs[doneID] = domain.Job{
+		ID: doneID, UserID: user, Status: domain.StatusDone, Title: "Клип", MediaID: &mediaID,
+		Source: domain.SourceYouTube, CreatedAt: now.Add(-time.Minute),
+	}
+	e.store.Jobs[failedID] = domain.Job{
+		ID: failedID, UserID: user, Status: domain.StatusFailed, Source: domain.SourceYouTube, CreatedAt: now,
+	}
+	e.store.Jobs[queuedID] = domain.Job{
+		ID: queuedID, UserID: user, Status: domain.StatusQueued, Source: domain.SourceTikTok,
+		URL: "https://www.tiktok.com/@u/video/1", CreatedAt: now.Add(-time.Second),
+	}
+	list, err := e.api.List(ctx, user, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list = %+v", list)
+	}
+	for _, v := range list {
+		if v.Job.ID == failedID || v.Job.Status == domain.StatusFailed {
+			t.Fatalf("failed empty download listed: %+v", v.Job)
+		}
+	}
+	if list[0].Job.ID != queuedID || list[1].Job.Title != "Клип" {
+		t.Fatalf("order = %+v %+v", list[0].Job, list[1].Job)
+	}
+}
+
 func TestTrimWindow(t *testing.T) {
 	if _, _, err := TrimWindow(0, 0.5, 10); err != ErrBadRange {
 		t.Fatalf("short: %v", err)

@@ -44,7 +44,9 @@ func TestProbeWritesInfoAndArgs(t *testing.T) {
 	args := string(raw)
 	for _, want := range []string{
 		"--ignore-config", "--no-playlist", "--js-runtimes\ndeno", "--ffmpeg-location\n/usr/bin/ffmpeg",
-		"--proxy\nhttp://p:1", "--cookies\n/c.txt", "--user-agent\nUA", "--max-filesize\n42", "--dump-single-json\n--\nhttps://www.youtube.com/watch?v=abc",
+		"--proxy\nhttp://p:1", "--cookies\n/c.txt", "--user-agent\nUA", "--max-filesize\n42",
+		"--socket-timeout\n8", "--retries\n0", "--fragment-retries\n0",
+		"--dump-single-json\n--\nhttps://www.youtube.com/watch?v=abc",
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q:\n%s", want, args)
@@ -52,6 +54,9 @@ func TestProbeWritesInfoAndArgs(t *testing.T) {
 	}
 	if strings.Contains(args, "--no-check-certificates") {
 		t.Error("must never disable TLS verification")
+	}
+	if strings.Contains(args, "--socket-timeout\n30") || strings.Contains(args, "--retries\n3") {
+		t.Errorf("metadata probe must not use the long download timeouts:\n%s", args)
 	}
 }
 

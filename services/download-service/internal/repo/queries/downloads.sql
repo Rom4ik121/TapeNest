@@ -11,9 +11,11 @@ SELECT * FROM download.jobs WHERE id = $1;
 SELECT * FROM download.jobs WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL;
 
 -- name: ListUserJobs :many
+-- Failed rows with no file are not library videos (empty «Без названия» cards).
 SELECT * FROM download.jobs
 WHERE user_id = sqlc.arg(user_id)
   AND deleted_at IS NULL
+  AND NOT (status = 'failed' AND media_id IS NULL)
   AND (sqlc.narg(before_created)::timestamptz IS NULL
        OR (created_at, id) < (sqlc.narg(before_created)::timestamptz, sqlc.narg(before_id)::uuid))
 ORDER BY created_at DESC, id DESC
