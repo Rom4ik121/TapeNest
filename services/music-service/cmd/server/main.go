@@ -14,10 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tapenest/tapenest/services/music-service/internal/acq"
 	"github.com/tapenest/tapenest/services/music-service/internal/app"
 	"github.com/tapenest/tapenest/services/music-service/internal/config"
-	"github.com/tapenest/tapenest/services/music-service/internal/mq"
 	"github.com/tapenest/tapenest/services/music-service/internal/reco"
 	"github.com/tapenest/tapenest/services/music-service/internal/service"
 	"github.com/tapenest/tapenest/services/music-service/internal/signer"
@@ -82,31 +80,16 @@ func run(migrateOnly bool) error {
 	} else {
 		log.Info("my wave: RECO_SERVICE_URL not set, heuristic only")
 	}
-	var acquirer service.Acquirer
-	if cfg.SourceEnabled("torrent") {
-		if c := acq.New(cfg.AcquisitionURL, cfg.InternalToken); c != nil {
-			acquirer = c
-		}
-	}
 	streamer := service.NewStreamer(infra.Store, infra.Navidrome, signer.New(cfg.StreamSigningKey, cfg.StreamPublicBase), cfg.StreamURLTTL, log).
 		WithCoverArchive(cfg.CoverArtURL)
-	if cfg.SourceEnabled("youtube") {
-		streamer.WithYouTubeAudio(ytdlp.New(cfg.YTDLPBin))
-		log.Info("catalog: youtube music primary")
-	}
 	library := service.NewLibrary(infra.Store).WithEvents(publish)
 	var discovery *service.Discovery
-	if acquirer != nil || cfg.SourceEnabled("youtube") {
-		if acquirer != nil {
-			streamer.WithAcquirer(acquirer)
-			library.WithAcquirer(acquirer, log)
-		}
-		discovery = service.NewDiscovery(infra.Store, acquirer, log).WithRefreshNotifier(func(ctx context.Context) error {
-			return infra.Redis.Publish(ctx, mq.CatalogRefreshChannel, "1").Err()
-		})
-		if cfg.SourceEnabled("youtube") {
-			discovery.WithYouTube(ytm.New())
-		}
+	if cfg.SourceEnabled("youtube") {
+		streamer.WithYouTubeAudio(ytdlp.New(cfg.YTDLPBin))
+		discovery = service.NewDiscovery(infra.Store, log).WithYouTube(ytm.New())
+		log.Info("catalog: youtube music")
+	} else {
+		log.Info("catalog: local library only")
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Library:       library,

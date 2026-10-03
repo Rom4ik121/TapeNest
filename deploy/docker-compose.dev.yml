@@ -1,12 +1,12 @@
 # TapeNest — local development infrastructure (spec §10.1, §18.4).
 #
-#   make infra-up            # core: postgres, redis, minio, navidrome, torrserver
+#   make infra-up            # core: postgres, redis, minio, navidrome
 #   make infra-up-all        # + observability (prometheus, grafana) + edge (nginx)
 #
 #   make app-up              # + Go services (api-gateway, bot-service), profile "app"
 #
-# Every port is bound to 127.0.0.1 — *arr/Navidrome/TorrServer must never be
-# public (spec §14). Values come from ../.env (see ../.env.example); the
+# Every port is bound to 127.0.0.1 — Navidrome must never be public.
+# Values come from ../.env (see ../.env.example); the
 # defaults below are for local dev only.
 name: tapenest-dev
 
@@ -80,20 +80,6 @@ services:
       - navidrome_data:/data
       - ${MUSIC_DIR:-../data/music}:/music:ro
 
-  torrserver:
-    <<: *restart
-    # spec §3.2: ghcr.io/yourok/torrserver pinned by digest (tag MatriX.145)
-    image: ghcr.io/yourok/torrserver:MatriX.145@sha256:d32d5de9472bc9847aee5c536d34885fdc9332b957d9fc2c707ea064932a583d
-    environment:
-      TS_PORT: 8090
-      TS_DONTKILL: 1
-      TS_CONF_PATH: /opt/ts/config
-      TS_TORR_DIR: /opt/ts/torrents
-    ports:
-      - "127.0.0.1:${TORRSERVER_PORT:-8090}:8090" # UI/API — internal only
-    volumes:
-      - torrserver_data:/opt/ts
-
   # ── Go services (profile "app"; stage 1) ──────────────────────────────────
   api-gateway:
     <<: *restart
@@ -109,13 +95,11 @@ services:
       TRUST_PROXY_HEADERS: "true"
       DOWNLOAD_SERVICE_URL: http://download-service:8082
       MUSIC_SERVICE_URL: http://music-service:8084
-      STREAMING_SERVICE_URL: http://streaming-service:8094
     ports:
       - "127.0.0.1:${API_GATEWAY_PORT:-8080}:8080"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-      streaming-service: { condition: service_started }
 
   bot-service:
     <<: *restart
@@ -250,57 +234,6 @@ services:
       reco-service: { condition: service_started }
       music-service: { condition: service_started }
 
-  # ── invisible acquisition (ADR 0011; API + worker share one image) ─────
-  acquisition-service:
-    <<: *restart
-    profiles: ["app"]
-    build: ../services/acquisition-service
-    env_file:
-      - path: ../.env
-        required: false
-    environment: &acquisition-env
-      ACQUISITION_SERVICE_PORT: "8088"
-      ACQUISITION_WORKER_PORT: "8089"
-      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
-      REDIS_URL: redis://redis:6379/0
-      MUSIC_SERVICE_URL: http://music-service:8084
-      LIDARR_URL: ${LIDARR_URL:-http://host.docker.internal:8686}
-      PROWLARR_URL: ${PROWLARR_URL:-http://host.docker.internal:9696}
-      QBITTORRENT_URL: ${QBITTORRENT_URL:-http://host.docker.internal:8092}
-      MUSIC_DIR: /music
-      TORRENT_DIR: /downloads
-      MIGRATE_ON_START: "true"
-    ports:
-      - "127.0.0.1:${ACQUISITION_SERVICE_PORT:-8088}:8088"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ${MUSIC_DIR:-../data/music}:/music
-      - ${TORRENT_DIR:-../data/torrents}:/downloads
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-      music-service: { condition: service_started }
-
-  acquisition-worker:
-    <<: *restart
-    profiles: ["app"]
-    build: ../services/acquisition-service
-    entrypoint: ["/acquisition-worker"]
-    env_file:
-      - path: ../.env
-        required: false
-    environment:
-      <<: *acquisition-env
-      MIGRATE_ON_START: "false"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ${MUSIC_DIR:-../data/music}:/music
-      - ${TORRENT_DIR:-../data/torrents}:/downloads
-    depends_on:
-      acquisition-service: { condition: service_started }
-
   # ── observability (profile) ───────────────────────────────────────────
   prometheus:
     <<: *restart
@@ -329,42 +262,7 @@ services:
     depends_on:
       - prometheus
 
-  # ── stage 4: cinema (API + worker; HLS preview is generated, no film files) ─
-  streaming-service:
-    <<: *restart
-    profiles: ["app"]
-    build: ../services/streaming-service
-    env_file:
-      - path: ../.env
-        required: false
-    environment: &streaming-env
-      STREAMING_SERVICE_PORT: "8094"
-      STREAMING_WORKER_PORT: "8095"
-      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
-      TORRSERVER_URL: http://torrserver:8090
-      MIGRATE_ON_START: "true"
-    ports:
-      - "127.0.0.1:${STREAMING_SERVICE_PORT:-8094}:8094"
-    depends_on:
-      postgres: { condition: service_healthy }
-      torrserver: { condition: service_started }
-
-  streaming-worker:
-    <<: *restart
-    profiles: ["app"]
-    build: ../services/streaming-service
-    entrypoint: []
-    command: ["streaming-worker"]
-    env_file:
-      - path: ../.env
-        required: false
-    environment:
-      <<: *streaming-env
-      MIGRATE_ON_START: "false"
-    depends_on:
-      streaming-service: { condition: service_started }
-
-  # ── edge (profile): /api → api-gateway, /hls → streaming, / → Vite ──────
+  # ── edge (profile): /api → api-gateway, / → Vite ──────
   nginx:
     <<: *restart
     profiles: ["edge"]
@@ -381,6 +279,5 @@ volumes:
   redis_data:
   minio_data:
   navidrome_data:
-  torrserver_data:
   prometheus_data:
   grafana_data:

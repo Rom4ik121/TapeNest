@@ -78,7 +78,7 @@ SQL
   done
   # schemas are owned by the app role (docker init runs as that role already)
   sudo -u postgres psql -q -d "$POSTGRES_DB" -c \
-    "DO \$\$DECLARE s text; BEGIN FOREACH s IN ARRAY ARRAY['gateway','bot','download','music','streaming','acquisition'] LOOP IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = s) THEN EXECUTE format('ALTER SCHEMA %I OWNER TO %I', s, '$POSTGRES_USER'); END IF; END LOOP; END\$\$;" >/dev/null
+    "DO \$\$DECLARE s text; BEGIN FOREACH s IN ARRAY ARRAY['gateway','download','music'] LOOP IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = s) THEN EXECUTE format('ALTER SCHEMA %I OWNER TO %I', s, '$POSTGRES_USER'); END IF; END LOOP; END\$\$;" >/dev/null
   status
 }
 down() {

@@ -1,6 +1,6 @@
 # ADR 0009: music-service — signed stream proxy, Navidrome catalog sync, wave MVP, play_events batching
 
-- Status: Accepted
+- Status: Accepted. The Lidarr/torrent fill described below is withdrawn by [0014](0014-drop-cinema-and-torrent-stack.md). The local Navidrome catalog and signed stream proxy remain.
 - Date: 2026-09-25
 - Stage: 3 (spec §5.4, §3.1 #8/#11/#12, §8, §9)
 

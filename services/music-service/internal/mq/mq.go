@@ -116,8 +116,8 @@ func PublishUserEvent(ctx context.Context, rdb redis.UniversalClient, e UserEven
 	return nil
 }
 
-// Catalog refresh signalling (ADR 0011): music-service API → music-worker
-// (rescan + sync now), music-worker → reco-worker (catalog changed).
+// Catalog refresh signalling: a publisher asks music-worker to rescan and
+// sync now; the worker then tells reco-worker the catalog changed.
 const (
 	CatalogRefreshChannel = "music:catalog_refresh"
 	CatalogUpdatedChannel = "music:catalog_updated"

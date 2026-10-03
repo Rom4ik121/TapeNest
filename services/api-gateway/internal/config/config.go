@@ -41,10 +41,9 @@ type Config struct {
 	AdminTelegramIDsRaw string `env:"ADMIN_TELEGRAM_IDS"`
 	AdminTelegramIDs    map[int64]bool
 
-	MusicServiceURL     string        `env:"MUSIC_SERVICE_URL"`
-	DownloadServiceURL  string        `env:"DOWNLOAD_SERVICE_URL"`
-	StreamingServiceURL string        `env:"STREAMING_SERVICE_URL"`
-	UpstreamTimeout     time.Duration `env:"UPSTREAM_TIMEOUT" env-default:"10s"`
+	MusicServiceURL    string        `env:"MUSIC_SERVICE_URL"`
+	DownloadServiceURL string        `env:"DOWNLOAD_SERVICE_URL"`
+	UpstreamTimeout    time.Duration `env:"UPSTREAM_TIMEOUT" env-default:"10s"`
 }
 
 // Load reads env and validates the result.

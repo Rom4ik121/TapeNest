@@ -72,8 +72,6 @@ func notImplementedMessage(service string) string {
 		return "download-service is not deployed in this environment (set DOWNLOAD_SERVICE_URL)"
 	case "music":
 		return "music backend is not deployed yet (planned for stage 3)"
-	case "streaming":
-		return "streaming backend is not deployed yet (planned for stage 4)"
 	default:
 		return "service is not deployed"
 	}

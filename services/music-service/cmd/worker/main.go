@@ -83,7 +83,7 @@ func run() error {
 			return syncOnce(ctx)
 		})
 	})
-	// on-demand refresh after acquisition-service imported files (ADR 0011)
+	// on-demand Navidrome rescan when something publishes music:catalog_refresh
 	refresher := &worker.Refresher{
 		Scan: infra.Navidrome, Sync: syncOnce, Log: log,
 		Publish: func(ctx context.Context) error {

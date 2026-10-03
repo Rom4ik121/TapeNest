@@ -59,7 +59,7 @@ re-points the webhook and menu button when the URL changes.
 
 Endpoints: `GET /healthz`, `GET /readyz` (Redis), `POST /tg/webhook`.
 
-Commands: `/start`, `/help`, `/cinema` (alias `/cinenest`, ADR 0007).
+Commands: `/start`, `/help`.
 
 ## Environment
 

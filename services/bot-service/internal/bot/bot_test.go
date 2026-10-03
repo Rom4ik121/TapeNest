@@ -61,7 +61,7 @@ func msg(text, lang string) telegram.Update {
 }
 
 func TestStartAndHelp(t *testing.T) {
-	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, CineNest: "https://cine.example/"})
+	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL})
 	ctx := context.Background()
 	for _, tc := range []struct{ text, lang, prefix string }{
 		{"/start", "ru", "Привет, Roma!"},
@@ -82,7 +82,7 @@ func TestStartAndHelp(t *testing.T) {
 			t.Fatalf("%s: reply shape %+v", tc.text, m)
 		}
 		kb := m.ReplyMarkup.InlineKeyboard
-		if len(kb) != 2 || kb[0][0].WebApp == nil || kb[0][0].WebApp.URL != waveURL || kb[1][0].WebApp.URL != "https://cine.example/" {
+		if len(kb) != 1 || kb[0][0].WebApp == nil || kb[0][0].WebApp.URL != waveURL {
 			t.Fatalf("%s: keyboard %+v", tc.text, kb)
 		}
 	}
@@ -251,30 +251,15 @@ func TestSetup(t *testing.T) {
 	}
 }
 
-func TestCinemaCommand(t *testing.T) {
-	ctx := context.Background()
-	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, CineNest: "https://x.example/cinenest/"})
-	if cmds := b.Commands(i18n.RU); len(cmds) != 3 || cmds[2].Command != "cinema" || cmds[2].Description == "" {
+func TestCinemaCommandRemoved(t *testing.T) {
+	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL})
+	if cmds := b.Commands(i18n.RU); len(cmds) != 2 {
 		t.Fatal(cmds)
 	}
-	for _, text := range []string{"/cinema", "/cinenest@tapenest_bot"} {
-		s.sent = nil
-		if err := b.Handle(ctx, msg(text, "en"), "r"); err != nil {
-			t.Fatal(err)
-		}
-		m := s.sent[0]
-		if !strings.HasPrefix(m.Text, "🎬 CineNest") || m.ReplyMarkup == nil {
-			t.Fatalf("%s: %+v", text, m)
-		}
-		kb := m.ReplyMarkup.InlineKeyboard
-		if len(kb) != 1 || kb[0][0].WebApp.URL != "https://x.example/cinenest/" {
-			t.Fatalf("%s: keyboard %+v", text, kb)
-		}
+	if err := b.Handle(context.Background(), msg("/cinema", "en"), "r"); err != nil {
+		t.Fatal(err)
 	}
-	// Not configured → plain notice, no button, and no /cinema in the menu.
-	b2, s2, _ := newBot(t, MiniApps{WavePlayer: waveURL})
-	_ = b2.Handle(ctx, msg("/cinema", "ru"), "r")
-	if len(s2.sent) != 1 || s2.sent[0].ReplyMarkup != nil || !strings.Contains(s2.sent[0].Text, "не подключён") {
-		t.Fatalf("%+v", s2.sent)
+	if len(s.sent) != 1 || !strings.Contains(s.sent[0].Text, "don't know") {
+		t.Fatalf("%+v", s.sent)
 	}
 }

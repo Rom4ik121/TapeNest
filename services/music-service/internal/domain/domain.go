@@ -37,7 +37,7 @@ type Track struct {
 	CoverArtID  string // "" → no cover
 	DurationSec int
 	Liked       bool
-	Remote      bool      // not on the server yet: acquired on first play/like (ADR 0011)
+	Remote      bool      // YouTube Music row: played from YouTube, not a local file (ADR 0012)
 	ArtistID    uuid.UUID // internal (wave session bookkeeping), not in the contract
 }
 
@@ -63,31 +63,15 @@ type Artist struct {
 	YouTubeBrowse string // UC… channel, not part of the HTTP contract
 }
 
-// SearchResult is the unified search (library, then YouTube Music, then MusicBrainz).
+// SearchResult is the unified search (library, then YouTube Music).
 type SearchResult struct {
 	Tracks  []Track
 	Albums  []Album
 	Artists []Artist
 }
 
-// Acquisition states surfaced to the player (stream-url 202 body).
-type Acquisition struct {
-	State      string
-	Progress   float64
-	RetryAfter int // ms
-}
-
-// PendingError means a remote track is being acquired; retry the stream URL later.
-type PendingError struct{ Acquisition }
-
-func (e *PendingError) Error() string { return "acquisition pending: " + e.State }
-
-// Acquisition error codes (small toast in the player).
-var (
-	ErrNoSources       = errors.New("no sources found")
-	ErrAcquireQuota    = errors.New("acquisition quota exceeded")
-	ErrAcquireDisabled = errors.New("acquisition disabled")
-)
+// ErrNoSources means the track has neither a library file nor a YouTube id.
+var ErrNoSources = errors.New("no sources found")
 
 // Wave strategies (response field "strategy", header X-Wave-Strategy).
 const (

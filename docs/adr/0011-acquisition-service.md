@@ -1,6 +1,6 @@
 # ADR 0011: invisible acquisition of missing tracks
 
-- Status: Accepted
+- Status: Superseded by [0014](0014-drop-cinema-and-torrent-stack.md). acquisition-service, Lidarr, and the torrent fallback are removed. Do not rebuild them from this record.
 - Date: 2026-10-02
 - Stage: acquisition (after reco). User request: search and listen to any track in the app;
   the user does not add anything from outside. A missing file is fetched by torrent in the

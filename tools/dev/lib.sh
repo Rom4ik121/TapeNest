@@ -84,17 +84,6 @@ start_vite() {
   echo "vite up (pid $(pid_of vite))"
 }
 
-# CineNest (apps/cinenest, base /cinenest/) — reached via the WavePlayer Vite proxy.
-start_cinenest() {
-  stop_proc cinenest
-  local host="${1:-}"
-  (cd "$ROOT/apps/cinenest" && { [[ -d node_modules ]] || npm ci; } &&
-    VITE_DEV_PUBLIC_HOST="$host" GATEWAY_URL="http://127.0.0.1:${API_GATEWAY_PORT:-8080}" \
-    spawn cinenest npx vite --port "${CINENEST_PORT:-5174}" --strictPort)
-  wait_http "http://127.0.0.1:${CINENEST_PORT:-5174}/cinenest/" 40 || { echo "cinenest not ready" >&2; return 1; }
-  echo "cinenest up (pid $(pid_of cinenest))"
-}
-
 start_ngrok() {
   if is_running ngrok && [[ -n "$(ngrok_url)" && "${NGROK_RESTART:-0}" != 1 ]]; then
     echo "ngrok already running (pid $(pid_of ngrok)) — URL kept"; return 0
@@ -114,7 +103,7 @@ start_bot() {
   local url="$1"
   stop_proc bot-service
   build_go bot-service
-  TELEGRAM_WEBHOOK_URL="$url/tg/webhook" MINIAPP_WAVEPLAYER_URL="$url/" MINIAPP_CINENEST_URL="$url/cinenest/" \
+  TELEGRAM_WEBHOOK_URL="$url/tg/webhook" MINIAPP_WAVEPLAYER_URL="$url/" \
     spawn bot-service "$BIN_DIR/bot-service"
   wait_http "http://127.0.0.1:${BOT_SERVICE_PORT:-8081}/readyz" 30 || { echo "bot-service not ready, see $LOG_DIR/bot-service.log" >&2; return 1; }
   echo "$url" >"$LOG_DIR/miniapp-url.txt"
@@ -163,50 +152,8 @@ start_reco() {
   echo "reco-service up (pid $(pid_of reco-service)), worker pid $(pid_of reco-worker)"
 }
 
-# Lidarr + Prowlarr + qBittorrent-nox (pinned, checksum-verified, 127.0.0.1 only).
-start_arr() { "$ROOT/tools/dev/arr-native.sh" up; }
-
-# DEV/E2E ONLY: Torznab stub serving licence-verified CC0 Internet Archive torrents.
-start_legal_indexer() {
-  stop_proc legal-indexer
-  (cd "$ROOT/tools/legal-indexer" && GOTOOLCHAIN=local go build -o "$BIN_DIR/legal-indexer" .)
-  spawn legal-indexer "$BIN_DIR/legal-indexer"
-  wait_http "http://127.0.0.1:8093/healthz" 60 || { echo "legal-indexer not ready, see $LOG_DIR/legal-indexer.log" >&2; return 1; }
-  build_go acquisition-service acqctl acqctl
-  "$BIN_DIR/acqctl" add-test-indexer -url http://127.0.0.1:8093
-  echo "legal-indexer up (pid $(pid_of legal-indexer))"
-}
-
-start_acquisition() {
-  stop_proc acquisition-worker
-  stop_proc acquisition-service
-  build_go acquisition-service server acquisition-service
-  build_go acquisition-service worker acquisition-worker
-  local music="http://127.0.0.1:${MUSIC_SERVICE_PORT:-8084}"
-  MUSIC_SERVICE_URL="$music" spawn acquisition-service "$BIN_DIR/acquisition-service"
-  wait_http "http://127.0.0.1:${ACQUISITION_SERVICE_PORT:-8088}/healthz" 30 || { echo "acquisition-service not ready, see $LOG_DIR/acquisition-service.log" >&2; return 1; }
-  MIGRATE_ON_START=false MUSIC_SERVICE_URL="$music" spawn acquisition-worker "$BIN_DIR/acquisition-worker"
-  wait_http "http://127.0.0.1:${ACQUISITION_WORKER_PORT:-8089}/healthz" 20 || { echo "acquisition-worker not ready, see $LOG_DIR/acquisition-worker.log" >&2; return 1; }
-  echo "acquisition-service up (pid $(pid_of acquisition-service)), worker pid $(pid_of acquisition-worker)"
-}
-
 start_watch() {
   stop_proc url-watch
   spawn url-watch "$ROOT/tools/dev/url-watch.sh"
   echo "url-watch up (pid $(pid_of url-watch))"
-}
-
-# streaming-service API :8094 + worker (health :8095). Cinema catalog is local;
-# /hls is proxied by Vite/nginx straight here (signed playlists).
-start_streaming() {
-  stop_proc streaming-worker
-  stop_proc streaming-service
-  build_go streaming-service server streaming-service
-  build_go streaming-service worker streaming-worker
-  CINEMA_PREVIEW_DIR="${CINEMA_PREVIEW_DIR:-$ROOT/apps/cinenest/dev-assets/mock-hls}" \
-    spawn streaming-service "$BIN_DIR/streaming-service"
-  wait_http "http://127.0.0.1:${STREAMING_SERVICE_PORT:-8094}/readyz" 40 || { echo "streaming-service not ready, see $LOG_DIR/streaming-service.log" >&2; return 1; }
-  MIGRATE_ON_START=false spawn streaming-worker "$BIN_DIR/streaming-worker"
-  wait_http "http://127.0.0.1:${STREAMING_WORKER_PORT:-8095}/healthz" 20 || { echo "streaming-worker not ready, see $LOG_DIR/streaming-worker.log" >&2; return 1; }
-  echo "streaming-service up (pid $(pid_of streaming-service)), worker pid $(pid_of streaming-worker)"
 }

@@ -110,7 +110,7 @@ func newTestEnv(t *testing.T, o opts) *testEnv {
 			"redis":    PingFunc(func(ctx context.Context) error { return rdb.Ping(ctx).Err() }),
 			"postgres": PingFunc(func(context.Context) error { return nil }),
 		},
-		Music: mk("music", o.music), Download: mk("download", o.download), Streaming: mk("streaming", ""),
+		Music: mk("music", o.music), Download: mk("download", o.download),
 	})
 	e.srv = httptest.NewServer(h)
 	t.Cleanup(e.srv.Close)
@@ -384,8 +384,8 @@ func TestUpstreamRouting(t *testing.T) {
 	if r.status != 501 || r.body["code"] != CodeNotImplemented || r.body["service"] != "download" {
 		t.Fatalf("501: %d %s", r.status, r.raw)
 	}
-	if r := e.do(t, "GET", "/api/v1/cinema/titles", nil, bearer(tok.AccessToken)); r.status != 501 || r.body["service"] != "streaming" {
-		t.Fatalf("streaming 501: %d", r.status)
+	if r := e.do(t, "GET", "/api/v1/cinema/titles", nil, bearer(tok.AccessToken)); r.status != 404 {
+		t.Fatalf("cinema removed: %d", r.status)
 	}
 	// Configured but down → 503 SERVICE_UNAVAILABLE, then the breaker opens.
 	music.Close()

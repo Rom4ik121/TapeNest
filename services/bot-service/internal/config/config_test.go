@@ -28,7 +28,6 @@ func TestValidation(t *testing.T) {
 		"short secret":     {"TELEGRAM_WEBHOOK_SECRET", "short"},
 		"bad secret chars": {"TELEGRAM_WEBHOOK_SECRET", "abcdefghijklmnop!!!!"},
 		"http miniapp":     {"MINIAPP_WAVEPLAYER_URL", "http://x.example/"},
-		"http cinenest":    {"MINIAPP_CINENEST_URL", "http://x.example/"},
 		"no webhook url":   {"TELEGRAM_WEBHOOK_URL", ""},
 		"bad path":         {"TELEGRAM_WEBHOOK_PATH", "tg"},
 		"short internal":   {"INTERNAL_API_TOKEN", "x"},

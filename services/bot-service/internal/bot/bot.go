@@ -28,7 +28,6 @@ type Downloader interface {
 // MiniApps are the mini app URLs shown as web_app buttons.
 type MiniApps struct {
 	WavePlayer string
-	CineNest   string // optional
 }
 
 // Bot handles updates.
@@ -47,32 +46,16 @@ func New(tg Sender, gw Downloader, texts *i18n.Bundle, apps MiniApps, log *slog.
 
 // Commands returns the localized command list for setMyCommands.
 func (b *Bot) Commands(l i18n.Lang) []telegram.BotCommand {
-	cmds := []telegram.BotCommand{
+	return []telegram.BotCommand{
 		{Command: "start", Description: b.texts.T(l, "commands.start")},
 		{Command: "help", Description: b.texts.T(l, "commands.help")},
 	}
-	if b.apps.CineNest != "" {
-		cmds = append(cmds, telegram.BotCommand{Command: "cinema", Description: b.texts.T(l, "commands.cinema")})
-	}
-	return cmds
-}
-
-func (b *Bot) cinemaKeyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
-	return &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{
-		{Text: b.texts.T(l, "button.cinenest"), WebApp: &telegram.WebAppInfo{URL: b.apps.CineNest}},
-	}}}
 }
 
 func (b *Bot) keyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
-	rows := [][]telegram.InlineKeyboardButton{{
+	return &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{
 		{Text: b.texts.T(l, "button.waveplayer"), WebApp: &telegram.WebAppInfo{URL: b.apps.WavePlayer}},
-	}}
-	if b.apps.CineNest != "" {
-		rows = append(rows, []telegram.InlineKeyboardButton{
-			{Text: b.texts.T(l, "button.cinenest"), WebApp: &telegram.WebAppInfo{URL: b.apps.CineNest}},
-		})
-	}
-	return &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
+	}}}
 }
 
 // parseCommand returns "start" for "/start payload" or "/start@MyBot".
@@ -115,11 +98,6 @@ func (b *Bot) command(ctx context.Context, m *telegram.Message, lang i18n.Lang, 
 		return b.reply(ctx, m, text, true)
 	case "help":
 		return b.reply(ctx, m, b.texts.T(lang, "help.text", "sources", links.SourceNames()), true)
-	case "cinema", "cinenest":
-		if b.apps.CineNest == "" {
-			return b.reply(ctx, m, b.texts.T(lang, "cinema.unavailable"), false)
-		}
-		return b.send(ctx, m, b.texts.T(lang, "cinema.open"), b.cinemaKeyboard(lang))
 	default:
 		return b.reply(ctx, m, b.texts.T(lang, "command.unknown"), false)
 	}

@@ -1,6 +1,6 @@
 # ADR 0013: CineNest streaming-service uses the fictional catalog and a generated preview
 
-- Status: Accepted
+- Status: Superseded by [0014](0014-drop-cinema-and-torrent-stack.md). streaming-service, CineNest, and TorrServer are removed. Do not rebuild them from this record.
 - Date: 2026-10-02
 
 ## Context

@@ -20,13 +20,12 @@
 
 ## 2. ЦЕЛЬ ПРОДУКТА
 
-Telegram-бот **TapeNest** с тремя мини-приложениями:
+Telegram-бот **TapeNest**:
 
-1. **MediaHub** — галерея скачанных видео + редакторы (Post-MVP).
-2. **WavePlayer** — музыкальный плеер: поиск, стриминг, папки, «Моя волна» (MVP — упрощённая волна).
-3. **CineNest** — просмотр фильмов через TorrServer (MVP).
+1. **WavePlayer** — музыка: поиск и воспроизведение из YouTube Music, локальная библиотека Navidrome, рекомендации «Моя волна».
+2. Бот принимает ссылку на видео с поддерживаемых источников и скачивает её для пользователя (download-service → MinIO).
 
-Ядро: бот принимает ссылку на видео с поддерживаемых источников и скачивает её в библиотеку пользователя.
+Кинокаталога, CineNest, TorrServer, acquisition/Lidarr и редактора скачанных видео нет (ADR 0014). Редактор не добавлять.
 
 <!-- ИСПРАВЛЕНО (аудит, кат. 5): «1000+ источников yt-dlp» — технически экстракторов 1800+,
      но стабильно работают ~20–30. Зафиксирован приоритетный список; остальные — best effort. -->
@@ -58,7 +57,7 @@ SoundCloud (аудио), Bandcamp (аудио). Остальные экстра�
 | 11 | Обновление агрегатов | **Go-воркер по расписанию** | Не pg_cron (не зависит от расширений БД) |
 | 12 | Топология БД | **MVP: один PostgreSQL, отдельная schema на сервис**. Post-MVP: отдельные БД | Проще бэкапы и деплой на одном VPS |
 | 13 | Аудио на фронте | **MVP: HTMLAudioElement** (уже реализовано в WavePlayer). Post-MVP: Web Audio API для gapless | Ограничение MVP: между треками микропауза; позиция точна до ~1 с |
-| 14 | HLS для кино | **TorrServer direct play** (ремукс без транскодинга). Транскодинг — только Post-MVP и только GPU | <!-- ИСПРАВЛЕНО (аудит, кат. 5): CPU-транскодинг при «миллионах» — утопия --> |
+| 14 | Кино / HLS | **Снято** (ADR 0014). TorrServer, streaming-service и CineNest не входят в продукт | Не восстанавливать кинокаталог |
 
 ### 3.2. Стек с зафиксированными версиями
 
@@ -71,10 +70,8 @@ SoundCloud (аудио), Bandcamp (аудио). Остальные экстра�
 | Redis | 7.4.x |
 | React / TypeScript | 18.3.x / 5.6.x |
 | @telegram-apps/sdk-react | **2.11.x** (установлена в apps/waveplayer; API компонентов меняется между мажорами — при апгрейде проверять экспорты по типам в node_modules) |
-| hls.js | 1.5.x |
 | yt-dlp | пиннинг минорной версии в Dockerfile; **еженедельный bump** (источники ломают экстракторы); обновление — rolling, без downtime |
 | FFmpeg | 6.x (alpine) |
-| TorrServer | ghcr.io/yourok/torrserver:latest, пиннинг по digest |
 | Navidrome | 0.53.x |
 | MinIO | latest, пиннинг по digest |
 
@@ -92,43 +89,38 @@ redsync, sony/gobreaker, minio-go, testcontainers-go.
 ### 4.1. MVP (первая версия, 5 сервисов)
 
 ```
-Telegram ◄──► bot-service (Go: webhook, команды, меню мини-аппов, уведомления)
+Telegram ◄──► bot-service (Go: webhook, /start /help, ссылки на скачивание)
                  │
-Mini Apps ──► api-gateway (Go: REST, JWT-аутентификация [auth внутри],
+WavePlayer ──► api-gateway (Go: REST, JWT-аутентификация [auth внутри],
                  │           rate limit, маршрутизация, OpenAPI)
                  ▼
    ┌──────────────┬──────────────────┬─────────────────┐
    ▼              ▼                  ▼                 ▼
-download-svc   music-svc        streaming-svc     (общие зависимости)
-(yt-dlp,       (каталог,        (TorrServer-      PostgreSQL 16 (schema на сервис),
- дедуп,        папки, лайки,     клиент, HLS-     Redis 7 (кэш, очереди Streams,
- прокси,       позиции,         прокси,           локи, стримы событий),
- куки,         стрим через      позиции)          MinIO (файлы), Navidrome (/music),
- → MinIO)      Navidrome)                         TorrServer, Playwright-sidecar (куки)
+download-svc   music-svc          reco-svc        (общие зависимости)
+(yt-dlp,       (каталог Navidrome (My Wave:       PostgreSQL 16 (schema на сервис),
+ дедуп,         + YouTube Music,    профиль,      Redis 7 (кэш, очереди Streams,
+ прокси,        лайки, позиции,     co-occurrence локи, стримы событий),
+ куки,          подписанный стрим)  + ALS)        MinIO (файлы), Navidrome (/music)
+ → MinIO)
 ```
 
 - **auth** — пакет `internal/auth` внутри api-gateway (валидация initData, JWT).
   Post-MVP: выделяется в auth-service при появлении второго потребителя токенов.
 - **media-storage** — S3-клиент (minio-go) как пакет внутри download-svc.
-  Post-MVP: выделение при появлении editor-svc.
-- **«Моя волна» MVP:** популярное + не-давно-слушанное + лайки (эвристика, без ML).
-  Post-MVP: recommendation-service (content-based + ALS).
+- **«Моя волна»:** reco-service (ADR 0010). Эвристика music-service — запасной путь, если reco недоступен.
 
 ### 4.2. Post-MVP (после запуска, с триггерами)
 
 | Компонент | Триггер перехода |
 |---|---|
 | auth-service (выделение) | второй потребитель JWT-валидации |
-| media-storage-service | editor-svc или второй пишущий в S3 |
-| editor-service (видео/фото-редакторы) | подтверждённый спрос (метрика «кнопка редактировать») |
-| recommendation-service (ALS, эмбеддинги) | >10k MAU |
+| media-storage-service | второй пишущий в S3 помимо download-service |
 | notification-service | >3 типов уведомлений / необходимость очереди |
 | Kafka | >50k событий/мин или боль от Redis Streams |
 | ClickHouse | >10M play_events/мес |
 | PostgreSQL: отдельные БД + шардинг | >100k MAU; replica — раньше, при read-нагрузке |
 | K8s | >3 серверов / потребность в автоскейлинге |
 | CDN (Bunny) + прогрев топ-1000 | egress-расходы > $100/мес |
-| GPU-транскодинг (стриминг кино) | подтверждённая потребность в не-direct-play форматах |
 | Web Audio API (gapless) | жалобы на паузы между треками |
 
 ### 4.3. Структура monorepo
@@ -140,14 +132,14 @@ tapenest/
 │   ├── bot-service/
 │   ├── download-service/   # + internal/storage (minio-go, MVP)
 │   ├── music-service/
-│   └── streaming-service/
+│   └── reco-service/
 │   └── <сервис>/           # стандартный скелет:
 │       ├── cmd/server/main.go
 │       ├── cmd/worker/main.go      # если есть воркеры
 │       ├── internal/{config,domain,repo,service,transport,mq}/
 │       ├── migrations/
 │       └── Dockerfile              # multi-stage
-├── apps/                   # mediahub/ (Post-MVP), waveplayer/ (ГОТОВО), cinenest/
+├── apps/                   # waveplayer/
 ├── deploy/                 # docker-compose.dev.yml, pg/ (репликация), k8s/ (Post-MVP)
 ├── docs/adr/               # ADR — только для решений, НЕ вошедших в 3.1
 ├── tools/cookie-refresher/ # Playwright sidecar (куки)
@@ -164,7 +156,7 @@ tapenest/
 <!-- ИСПРАВЛЕНО (аудит, кат. 6): полные SQL-схемы и перечни эндпоинтов убраны из ТЗ; источник истины — миграции и OpenAPI-спеки. -->
 
 ### 5.1. bot-service
-- Webhook; команды `/start`, `/help`; распознавание URL в сообщении → задача скачивания; меню-кнопки 3 мини-аппов; отправка уведомлений (прямой вызов Bot API; Post-MVP — notification-service).
+- Webhook; команды `/start`, `/help`; распознавание URL в сообщении → задача скачивания; кнопка меню на WavePlayer; отправка уведомлений (прямой вызов Bot API; Post-MVP — notification-service).
 - Без бизнес-логики: парсинг → REST-вызов gateway.
 
 ### 5.2. api-gateway (+ auth)
@@ -189,25 +181,17 @@ tapenest/
 
 ### 5.4. music-service
 - Контракт **ЗАФИКСИРОВАН готовым фронтендом** `apps/waveplayer` (README волны — источник истины; пути не ломать).
-- Каталог: `artists/albums/tracks` (UUID) — наполняется Lidarr-стеком (Prowlarr → Lidarr → qBittorrent → том /music; только внутренняя сеть).
-- Стриминг: клиент Navidrome (Subsonic API), HTTP Range, `io.Copy`; circuit breaker; Navidrome недоступен → каталог/папки живы, плеер показывает «стриминг недоступен».
+- Каталог: `artists/albums/tracks` (UUID). Локальные файлы сканирует Navidrome (`/music`, только внутренняя сеть). Поиск и воспроизведение остального — YouTube Music (ADR 0012, 0014): `MUSIC_SOURCES` по умолчанию `youtube`, файл на диск не пишется. Торрент-пути и Lidarr нет.
+- Стриминг библиотеки: клиент Navidrome (Subsonic API), HTTP Range, `io.Copy`; circuit breaker; Navidrome недоступен → каталог жив, плеер библиотеки показывает «стриминг недоступен» (`service: "streaming"` — это имя деградации аудио, не отдельный сервис).
 - Пользовательские данные (primary-пул): папки/плейлисты, лайки, `playback_positions`.
 - `play_events` — таблица с RANGE-партициями по месяцам + BRIN по `played_at`; API принимает событие → 204 сразу → Redis Streams → воркер-батчер пишет пачками.
 - «Волна» MVP: популярное + недавнее + лайки, лёгкий реранк (не повторять недавно сыгранное).
 - Поиск: `pg_trgm` + GIN.
 - Read-write splitting: два пула (записи → primary, каталог → replica). MVP: replica опциональна (включается флагом `DB_REPLICA_URL`, пусто = только primary).
 
-### 5.5. streaming-service
-- TorrServer (REST :8090, только внутренняя сеть): add magnet / статусы / m3u8 / stream.
-- HLS-прокси: забрать m3u8 → **переписать относительные пути сегментов на абсолютные через наш домен** (иначе CORS/авторизация ломают плеер) → проксировать сегменты `io.Copy`.
-  <!-- ИСПРАВЛЕНО (аудит, кат. 2): «presigned без проксирования» противоречил HLS-прокси.
-       Правило: MinIO-файлы (галерея, музыка) — presigned напрямую; HLS-кино — прокси, это осознанное исключение. -->
-- Direct play (ремукс, без транскодинга) — ограничение зафиксировано (3.1, п.14).
-- Статус прогрева (TorrServer буферизует первые секунды — десятки секунд) → индикатор в плеере.
-- Каталог/карточки/поиск (`pg_trgm`), выбор серии/качества, позиции просмотра, «смотреть позже».
-- Поиск раздач: интерфейс `SourceProvider` (адаптеры трекеров; конфиг `CONTENT_SOURCES=p2p|licensed`).
-- Админ: CLI + admin-эндпоинты (RBAC), аудит-трейл.
-- Воркер: мониторинг торрентов, LRU-очистка по лимиту диска.
+### 5.5. reco-service
+- «Моя волна»: music-service запрашивает батчи у reco-service (таймаут + circuit breaker). При отказе остаётся эвристика music-service (ADR 0009, 0010).
+- Отдельного кино-сервиса нет.
 
 ---
 
@@ -219,8 +203,7 @@ tapenest/
   <!-- ИСПРАВЛЕНО (аудит, кат. 2/5): признано ограничение; Web Audio API — Post-MVP. -->
 - **Позиция воспроизведения (edge cases):** сохранять не только по debounce 5 с, но и **принудительно** — на pause, на switch-трека, на `visibilitychange`/`pagehide`. Иначе позиция теряется.
   <!-- ИСПРАВЛЕНО (аудит, кат. 5): debounce-only терял позицию при переключении. -->
-- **CineNest:** каталог-сетка, карточка (файлы торрента: серия/качество/размер), плеер hls.js 1.5.x + индикатор прогрева + продолжение с места, полноэкранный режим.
-- **MediaHub (Post-MVP):** галерея, редакторы — НЕ делать в MVP.
+- Других мини-аппов нет. CineNest и MediaHub сняты (ADR 0014). Редактор скачанных видео не добавлять.
 
 ---
 
@@ -241,7 +224,7 @@ tapenest/
 ## 8. НАДЁЖНОСТЬ («одно упало — другое живёт»)
 
 - `/healthz` + `/readyz` везде.
-- Circuit breaker (sony/gobreaker) на межсервисные вызовы; деградация: music-svc недоступен → галерея/кино живы; Navidrome недоступен → каталог жив, стриминг показывает сообщение; TorrServer недоступен → каталог жив; download недоступен → бот отвечает «скачивание временно недоступно».
+- Circuit breaker (sony/gobreaker) на межсервисные вызовы; деградация: music-svc недоступен → скачивания живы; Navidrome недоступен → каталог жив, стриминг библиотеки показывает сообщение; reco недоступен → волна на эвристике; download недоступен → бот отвечает «скачивание временно недоступно».
 - Ретраи: только идемпотентные, экспонента + jitter, ≤ 3.
 - Массовые блокировки источника (403/429): breaker по домену, снижение параллелизма, перевод пула на residential/mobile, алерт; остальные источники работают.
 - Хоррор-тест: docker-compose-сценарий, каждый сервис по очереди останавливается — сценарии остальных разделов работают (с деградацией).
@@ -255,8 +238,8 @@ tapenest/
 - **Модерация контента (юридические требования):**
   - репорты от пользователей + admin-отключение контента в течение 24 ч;
   - DMCA-процедура takedown: приостановка доступа к спорному файлу → разбор → удаление/возврат; журнал обращений;
-  - **hash-matching для CSAM (обязательно для UGC-платформ в большинстве юрисдикций):** интеграция с базой хэшей (Thorn Safer / PhotoDNA-совместимый API) для всех загружаемых фото/видео-превью; при совпадении — немедленное удаление, лог, блокировка источника; ключи API — в env;
-  - аудит-трейл действий админов.
+  - Отдельного hash-matching API в коде нет; переменные `CSAM_*` не задаются.
+  - аудит-трейл действий админов — только если такие эндпоинты есть. Admin acquisition и cinema admin сняты.
   <!-- ИСПРАВЛЕНО (аудит, кат. 4): добавлен раздел модерации с hash-matching. -->
 
 ---
@@ -264,7 +247,7 @@ tapenest/
 ## 10. ИНФРАСТРУКТУРА, ДЕПЛОЙ, БЮДЖЕТ
 
 ### 10.1. Разработка
-`docker-compose.dev.yml`: PostgreSQL 16 (+replica опционально, конфиги в `deploy/pg/`), Redis 7, MinIO, Navidrome (/music), TorrServer, Playwright-sidecar (куки), Nginx (/api → gateway, /hls → streaming, статика), сервисы, Vite dev, Prometheus+Grafana. `make dev` — всё одной командой.
+`docker-compose.dev.yml`: PostgreSQL 16 (+replica опционально, конфиги в `deploy/pg/`), Redis 7, MinIO, Navidrome (/music), Nginx (`/api` → gateway, `/` → Vite), сервисы (gateway, bot, download, music, reco), Vite dev, Prometheus+Grafana. TorrServer и `/hls` нет.
 
 ### 10.2. Prod: MVP — docker-compose на VPS за Nginx; Post-MVP — K8s (HPA воркеров по длине очереди, rolling update `maxUnavailable=0`).
 
@@ -291,7 +274,6 @@ tapenest/
 - **Логи:** `docker compose logs -f <service>`; JSON в stdout, trace-id сквозной.
 - **Очереди (Redis Streams):** `XINFO GROUPS <stream>`, RedisInsight; глубина — в метриках.
 - **МинIO:** консоль :9001 (создать бакеты, проверить presigned).
-- **TorrServer:** UI :8090 (только localhost/внутренняя сеть) — статусы торрентов, прогрев.
 - **Prometheus:** :9090 targets — все сервисы зелёные; Grafana :3000.
 
 ---
@@ -301,7 +283,7 @@ tapenest/
 - Backend: table-driven unit ≥ 70% бизнес-логики; integration — testcontainers (PG, Redis, MinIO); контрактные — по OpenAPI; идемпотентность консьюмеров.
 - Критичное: NormalizeURL (20+ кейсов), ErrorKind-классификатор, эскалация ретраев, батчер play_events, initData-валидация (подпись, TTL, replay).
 - Integration на реальных ссылках — отдельное окружение с прокси, не в базовом CI.
-- Frontend: Vitest + RTL; Playwright smoke (вход → волна → плеер; каталог → плеер фильма).
+- Frontend: Vitest + RTL; smoke WavePlayer (вход → волна → плеер).
 - Хоррор-тест отказоустойчивости; k6-нагрузочный смоук.
 
 ---
@@ -319,8 +301,8 @@ tapenest/
 
 - Скачивание — для личного использования пользователем.
 - **DRM не обходить** — failed с причиной `drm_protected`.
-- **P2P-контент (TorrServer, Lidarr-стек):** выбран владельцем осознанно; ответственность за публичный стриминг нелицензированного контента лежит на операторе. Обязательные механизмы: `CONTENT_SOURCES=p2p|licensed` (переключение без переписывания), DMCA-takedown (раздел 9), hash-matching CSAM, *arr/Navidrome/TorrServer — только внутренняя сеть, аудит-трейл.
-- Отчёт о правовых рисках — в ADR при запуске p2p-режима.
+- P2P, TorrServer и Lidarr-стек сняты (ADR 0014). Navidrome остаётся только во внутренней сети.
+- Стриминг с YouTube нарушает условия YouTube; риск на операторе (ADR 0012). Сервис не хранит это аудио для раздачи.
 
 ---
 
@@ -338,12 +320,12 @@ tapenest/
 ## 16. ROADMAP
 
 **Этап 0. Фундамент:** каркас monorepo (раздел 4.3), Makefile, docker-compose.dev, CI, .env.example, STATUS.md, tools/initdata-mock.
-**Этап 1. Ядро:** api-gateway + auth (initData→JWT) + bot-service + заглушки мини-аппов (WavePlayer готов — подключить к реальному API; CineNest — каркас).
+**Этап 1. Ядро:** api-gateway + auth (initData→JWT) + bot-service + WavePlayer на реальном API.
 **Этап 2. Скачивание:** NormalizeURL + дедуп (тесты) → очередь + rate limit → yt-dlp обёртка (двухпроходно) → прокси-пулы → куки-sidecar → S3-загрузка → бот end-to-end.
-**Этап 3. WavePlayer-бэкенд:** схема music (каталог/пользовательские/play_events) → каталог+поиск+стриминг (Navidrome) → папки/лайки/позиции → батчер play_events → волна-MVP (эвристика).
-**Этап 4. CineNest:** TorrServer + клиент → HLS-прокси → каталог/карточки/позиции → фронтенд (hls.js, прогрев, продолжение) → поиск раздач + админ-CLI.
-**Этап 5. Готовность к запуску:** мониторинг+алерты, хоррор-тест, нагрузочный смоук, модерация (репорты, hash-matching, DMCA), i18n, деплой на VPS.
-**Post-MVP:** по триггерам из 4.2 (editor, recommendation, notification, Kafka, ClickHouse, K8s, CDN, GPU).
+**Этап 3. WavePlayer-бэкенд:** схема music (каталог/пользовательские/play_events) → каталог+поиск+стриминг (Navidrome и YouTube Music) → папки/лайки/позиции → батчер play_events → волна (reco-service, эвристика как запасной путь).
+**Снято:** этап кино (CineNest, TorrServer, streaming-service) и невидимое торрент-скачивание музыки (ADR 0014). Не возвращать.
+**Этап 5. Готовность к запуску:** мониторинг+алерты, хоррор-тест, нагрузочный смоук, i18n, деплой на VPS.
+**Post-MVP:** по триггерам из 4.2 (notification, Kafka, ClickHouse, K8s, CDN). Редактор скачанных видео не входит в текущую работу.
 
 После каждого этапа: линты+тесты зелёные, README обновлён, **STATUS.md обновлён** (раздел 17).
 
@@ -369,7 +351,7 @@ tapenest/
 1. `STATUS.md` (пустой чек-лист по разделу 16).
 2. `.env.example` (все переменные, пустые значения, с комментариями).
 3. `Makefile` (dev, test, lint, proto-заготовка).
-4. `deploy/docker-compose.dev.yml` (PG, Redis, MinIO, Navidrome, TorrServer, Nginx, Grafana).
+4. `deploy/docker-compose.dev.yml` (PG, Redis, MinIO, Navidrome, Nginx, Grafana).
 5. `go.mod` сервисов + скелеты (cmd/internal).
 6. CI-workflow.
 7. Далее — по roadmap из STATUS.md.
@@ -399,8 +381,5 @@ tapenest/
 - [ ] Telegram Bot Token (BotFather) + домены (API, мини-аппы) + HTTPS-сертификаты
 - [ ] Подписки прокси-провайдера (datacenter/residential/mobile) — бюджет из 10.3
 - [ ] 10–20 сервисных Google-аккаунтов для куки-обновления + риски их бана
-- [ ] Аккаунты трекеров (rutracker и др.) для SourceProvider
-- [ ] Ключ API hash-matching (Thorn Safer и т.п.)
-- [ ] Подтверждение правового режима p2p-контента (раздел 14) — осознанный риск владельца
 - [ ] Бюджет на инфраструктуру (10.3) и решение о моменте перехода Post-MVP-триггеров
 - [ ] VPS/хостинг для прод-деплоя
