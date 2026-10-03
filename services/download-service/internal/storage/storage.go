@@ -138,6 +138,28 @@ func (s *S3) PresignInternal(ctx context.Context, key, fileName string, ttl time
 	return presign(ctx, s.client, s.cfg.Bucket, key, fileName, ttl)
 }
 
+// PresignInline returns a user-facing GET URL without an attachment disposition,
+// so a browser can show the object in an <img> or <video>.
+func (s *S3) PresignInline(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	if s.public == nil {
+		return "", nil
+	}
+	u, err := s.public.PresignedGetObject(ctx, s.cfg.Bucket, key, ttl, nil)
+	if err != nil {
+		return "", fmt.Errorf("s3 presign: %w", err)
+	}
+	return u.String(), nil
+}
+
+// Open reads an object. The caller closes the body.
+func (s *S3) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	obj, err := s.client.GetObject(ctx, s.cfg.Bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("s3 get: %w", err)
+	}
+	return obj, nil
+}
+
 // PresignPublic returns a user-facing GET URL through the public origin ("" when
 // no PublicURL is configured).
 func (s *S3) PresignPublic(ctx context.Context, key, fileName string, ttl time.Duration) (string, error) {

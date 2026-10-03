@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tapenest/tapenest/services/download-service/internal/domain"
+	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 	"github.com/tapenest/tapenest/services/download-service/internal/mq"
 	"github.com/tapenest/tapenest/services/download-service/internal/repo"
 	"github.com/tapenest/tapenest/services/download-service/internal/service"
@@ -57,7 +59,7 @@ func setup(t *testing.T) *fixture {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	api := service.NewAPI(service.APIDeps{
 		Store: f.store, Queue: q, Bus: f.bus, Files: f.files, Guard: &guard{},
-		Quotas: service.Quotas{Active: 3, Daily: 30}, PresignTTL: time.Hour, Log: log,
+		Quotas: service.Quotas{Active: 3, Daily: 30}, PresignTTL: time.Hour, Editor: bytesEditor{}, Log: log,
 	})
 	f.srv = httptest.NewServer(NewRouter(Deps{
 		API: api, Bus: f.bus, InternalToken: token, Log: log, Ready: f.ready,
@@ -311,5 +313,108 @@ func TestSSE(t *testing.T) {
 	}
 	if r, _ := f.do(t, "GET", "/api/v1/downloads/x/events", "", nil); r.StatusCode != 404 {
 		t.Fatal(r.StatusCode)
+	}
+}
+
+type bytesEditor struct{}
+
+func (bytesEditor) Poster(context.Context, string, string) error { return nil }
+
+func (bytesEditor) Trim(_ context.Context, src, dst string, _, _ time.Duration) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o600)
+}
+
+func (bytesEditor) Compose(_ context.Context, spec ffmpeg.ComposeSpec, dst string) error {
+	var b []byte
+	for _, clip := range spec.Clips {
+		raw, err := os.ReadFile(clip.Path)
+		if err != nil {
+			return err
+		}
+		b = append(b, raw...)
+	}
+	if len(b) == 0 {
+		b = []byte("edit")
+	}
+	return os.WriteFile(dst, b, 0o600)
+}
+
+func TestLibraryHTTP(t *testing.T) {
+	f := setup(t)
+	mediaID := uuid.New()
+	key := "vk/2026/10/" + mediaID.String() + ".mp4"
+	f.files.Objects[key] = []byte("VIDEODATA")
+	f.store.Media[mediaID] = domain.Media{
+		ID: mediaID, URLHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		URL: "https://vk.com/video1", Source: domain.SourceVK, Title: "Ролик", DurationSec: 30,
+		ObjectKey: key, SizeBytes: 9, MimeType: "video/mp4",
+		Thumbnail: "https://cdn.example/poster.jpg", ExpiresAt: time.Now().Add(48 * time.Hour),
+	}
+	jobID := uuid.New()
+	now := time.Now()
+	f.store.Jobs[jobID] = domain.Job{
+		ID: jobID, UserID: f.user, URL: "https://vk.com/video1", Normalized: "https://vk.com/video1",
+		URLHash: f.store.Media[mediaID].URLHash, Source: domain.SourceVK, Status: domain.StatusDone,
+		Title: "Ролик", MediaID: &mediaID, CreatedAt: now, FinishedAt: &now,
+	}
+	path := "/api/v1/downloads/" + jobID.String()
+	r, b := f.do(t, "GET", path, "", nil)
+	if r.StatusCode != 200 || b["title"] != "Ролик" || b["posterUrl"] != "https://cdn.example/poster.jpg" {
+		t.Fatalf("get: %d %+v", r.StatusCode, b)
+	}
+	r, b = f.do(t, "PATCH", path, `{"title":"Новое имя"}`, nil)
+	if r.StatusCode != 200 || b["title"] != "Новое имя" {
+		t.Fatalf("rename: %d %+v", r.StatusCode, b)
+	}
+	if r, b := f.do(t, "PATCH", path, `{"title":"  "}`, nil); r.StatusCode != 400 || b["code"] != CodeInvalid {
+		t.Fatalf("empty title: %d %+v", r.StatusCode, b)
+	}
+	if r, b := f.do(t, "POST", path+"/trim", `{"startSec":0,"endSec":0.4}`, nil); r.StatusCode != 400 {
+		t.Fatalf("bad trim: %d %+v", r.StatusCode, b)
+	}
+	r, b = f.do(t, "POST", path+"/trim", `{"startSec":1,"endSec":5}`, nil)
+	if r.StatusCode != 201 || b["status"] != "done" || b["id"] == jobID.String() {
+		t.Fatalf("trim: %d %+v", r.StatusCode, b)
+	}
+	cutID, _ := b["id"].(string)
+	r, b = f.do(t, "GET", "/api/v1/downloads?limit=10", "", nil)
+	items, _ := b["items"].([]any)
+	if r.StatusCode != 200 || len(items) != 2 {
+		t.Fatalf("list: %d %+v", r.StatusCode, b)
+	}
+	composeBody := `{"title":"Монтаж","clips":[{"jobId":"` + jobID.String() + `","inSec":0,"outSec":4,"speed":1,"volume":1,"crop":{"x":0,"y":0,"w":1,"h":1},"rotate":0,"transition":"none","transitionSec":0},{"jobId":"` + jobID.String() + `","inSec":1,"outSec":5,"speed":2,"volume":0.5,"crop":{"x":0.1,"y":0.1,"w":0.8,"h":0.8},"rotate":90,"transition":"fade","transitionSec":0.4}],"texts":[{"text":"Привет","startSec":0.2,"endSec":1.2,"x":0.5,"y":0.2}],"music":{"jobId":"` + jobID.String() + `","inSec":0,"volume":0.4,"offsetSec":0.2}}`
+	r, b = f.do(t, "POST", "/api/v1/downloads/compose", composeBody, nil)
+	if r.StatusCode != 201 || b["title"] != "Монтаж" || b["status"] != "done" || b["id"] == jobID.String() {
+		t.Fatalf("compose: %d %+v", r.StatusCode, b)
+	}
+	badSpeed := `{"title":"Монтаж","clips":[{"jobId":"` + jobID.String() + `","inSec":0,"outSec":4,"speed":9,"volume":1,"crop":{"x":0,"y":0,"w":1,"h":1},"rotate":0,"transition":"none","transitionSec":0}]}`
+	if r, b := f.do(t, "POST", "/api/v1/downloads/compose", badSpeed, nil); r.StatusCode != 400 || b["code"] != CodeTimeline {
+		t.Fatalf("bad timeline: %d %+v", r.StatusCode, b)
+	}
+	r, _ = f.do(t, "DELETE", path, "", nil)
+	if r.StatusCode != 204 {
+		t.Fatal(r.StatusCode)
+	}
+	if r, b := f.do(t, "GET", path, "", nil); r.StatusCode != 404 || b["code"] != CodeNotFound {
+		t.Fatalf("deleted: %d %+v", r.StatusCode, b)
+	}
+	if _, ok := f.files.Objects[key]; !ok {
+		t.Fatal("source file must remain")
+	}
+	other := uuid.NewString()
+	if r, _ := f.do(t, "DELETE", "/api/v1/downloads/"+cutID, "", map[string]string{"X-User-Id": other}); r.StatusCode != 404 {
+		t.Fatal(r.StatusCode)
+	}
+	if r, _ := f.do(t, "DELETE", "/api/v1/downloads/"+cutID, "", nil); r.StatusCode != 204 {
+		t.Fatal(r.StatusCode)
+	}
+
+	gone := `{"title":"Монтаж","clips":[{"jobId":"` + jobID.String() + `","inSec":0,"outSec":4,"speed":1,"volume":1,"crop":{"x":0,"y":0,"w":1,"h":1},"rotate":0,"transition":"none","transitionSec":0}]}`
+	if r, b := f.do(t, "POST", "/api/v1/downloads/compose", gone, nil); r.StatusCode != 404 {
+		t.Fatalf("deleted source: %d %+v", r.StatusCode, b)
 	}
 }

@@ -2,7 +2,9 @@
 
 Stage 2: downloads public videos from **YouTube, VK Video and RuTube** with yt-dlp (+ ffmpeg for
 muxing, deno as yt-dlp's JS runtime), stores them in MinIO and delivers them to the mini-app (SSE +
-presigned links) and to the bot (Redis stream `download:events`). Decisions: ADR 0008.
+presigned links) and to the bot (Redis stream `download:events`). The same rows are the owner's
+library: rename (`PATCH`), hide (`DELETE`), trim (`POST …/trim`) and a timeline export
+(`POST …/compose`, ffmpeg). Decisions: ADR 0008, ADR 0014, ADR 0015.
 Contract: [`docs/api/download.openapi.yaml`](../../docs/api/download.openapi.yaml).
 
 Stack: Go 1.22, chi, pgx + sqlc (schema `download`), golang-migrate, go-redis (Streams, ZSET,

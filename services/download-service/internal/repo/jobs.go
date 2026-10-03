@@ -38,8 +38,8 @@ func toJob(r db.DownloadJob) domain.Job {
 		ID: r.ID, UserID: r.UserID, URL: r.Url, Normalized: r.NormalizedUrl, URLHash: r.UrlHash,
 		Source: domain.Source(r.Source), Status: domain.Status(r.Status), Stage: domain.Stage(r.Stage),
 		Priority: domain.Priority(r.Priority), Attempts: int(r.Attempts), ErrorKind: domain.ErrorKind(r.ErrorKind),
-		ErrorMessage: r.ErrorMessage, MediaID: r.MediaID, Title: r.Title, CreatedAt: r.CreatedAt,
-		UpdatedAt: r.UpdatedAt, FinishedAt: r.FinishedAt,
+		ErrorMessage: r.ErrorMessage, MediaID: r.MediaID, Title: r.Title, DisplayTitle: r.DisplayTitle,
+		DeletedAt: r.DeletedAt, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, FinishedAt: r.FinishedAt,
 	}
 	if r.ChatID != nil {
 		j.Chat = &domain.Chat{ChatID: *r.ChatID, Lang: r.Lang}
@@ -58,7 +58,7 @@ func toMedia(r db.DownloadMedium) domain.Media {
 		ID: r.ID, URLHash: r.UrlHash, URL: r.NormalizedUrl, Source: domain.Source(r.Source), ExternalID: r.ExternalID,
 		Title: r.Title, DurationSec: int(r.DurationSec), Width: int(r.Width), Height: int(r.Height), FormatID: r.FormatID,
 		ObjectKey: r.ObjectKey, SizeBytes: r.SizeBytes, MimeType: r.MimeType, Thumbnail: r.ThumbnailUrl,
-		CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt,
+		PosterKey: r.PosterKey, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt,
 	}
 }
 
@@ -214,10 +214,45 @@ func (s *Store) UpsertMedia(ctx context.Context, m domain.Media) (domain.Media, 
 		ID: m.ID, UrlHash: m.URLHash, NormalizedUrl: m.URL, Source: string(m.Source), ExternalID: m.ExternalID,
 		Title: m.Title, DurationSec: int32(m.DurationSec), Width: int32(m.Width), Height: int32(m.Height), //nolint:gosec // small values
 		FormatID: m.FormatID, ObjectKey: m.ObjectKey, SizeBytes: m.SizeBytes, MimeType: m.MimeType,
-		ThumbnailUrl: m.Thumbnail, ExpiresAt: m.ExpiresAt,
+		ThumbnailUrl: m.Thumbnail, PosterKey: m.PosterKey, ExpiresAt: m.ExpiresAt,
 	})
 	if err != nil {
 		return domain.Media{}, wrap("upsert media", err)
 	}
 	return toMedia(r), nil
+}
+
+// RenameJob sets the owner's display title on a finished, visible job.
+func (s *Store) RenameJob(ctx context.Context, userID, id uuid.UUID, title string) (domain.Job, error) {
+	r, err := s.q.RenameJob(ctx, db.RenameJobParams{UserID: userID, ID: id, DisplayTitle: title})
+	if err != nil {
+		return domain.Job{}, wrap("rename job", err)
+	}
+	return toJob(r), nil
+}
+
+// SoftDeleteJob hides a job from the owner's library.
+func (s *Store) SoftDeleteJob(ctx context.Context, userID, id uuid.UUID) (domain.Job, error) {
+	r, err := s.q.SoftDeleteJob(ctx, db.SoftDeleteJobParams{UserID: userID, ID: id})
+	if err != nil {
+		return domain.Job{}, wrap("delete job", err)
+	}
+	return toJob(r), nil
+}
+
+// CountLiveMediaRefs counts library rows that still point at the file.
+func (s *Store) CountLiveMediaRefs(ctx context.Context, mediaID uuid.UUID) (int, error) {
+	n, err := s.q.CountLiveMediaRefs(ctx, &mediaID)
+	if err != nil {
+		return 0, wrap("count media refs", err)
+	}
+	return int(n), nil
+}
+
+// SetPosterKey stores the jpeg object key for a media row.
+func (s *Store) SetPosterKey(ctx context.Context, mediaID uuid.UUID, key string) error {
+	if err := s.q.SetPosterKey(ctx, db.SetPosterKeyParams{ID: mediaID, PosterKey: key}); err != nil {
+		return wrap("set poster", err)
+	}
+	return nil
 }

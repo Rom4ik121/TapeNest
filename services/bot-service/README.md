@@ -59,12 +59,12 @@ re-points the webhook and menu button when the URL changes.
 
 Endpoints: `GET /healthz`, `GET /readyz` (Redis), `POST /tg/webhook`.
 
-Commands: `/start`, `/help`, `/cinema` (alias `/cinenest`, ADR 0007).
+Commands: `/start`, `/help`, `/videos` (the download library). `/cinema` answers that there is no film catalog and points at a pasted link.
 
 ## Environment
 
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_WEBHOOK_PATH`,
-`TELEGRAM_API_BASE`, `MINIAPP_WAVEPLAYER_URL`, `BOT_SERVICE_PORT`, `BOT_SETUP_ON_START`,
+`TELEGRAM_API_BASE`, `MINIAPP_WAVEPLAYER_URL`, `MINIAPP_VIDEOS_URL`, `BOT_SERVICE_PORT`, `BOT_SETUP_ON_START`,
 `BOT_MENU_BUTTON_TEXT`, `REDIS_URL`, `GATEWAY_URL`, `GATEWAY_TIMEOUT`, `INTERNAL_API_TOKEN`,
 `LOG_LEVEL`, `APP_ENV`, `DOWNLOAD_EVENTS_ENABLED` (default `true`), `TELEGRAM_UPLOAD_LIMIT`
 (default `50000000`; raise it only with a local Bot API server).

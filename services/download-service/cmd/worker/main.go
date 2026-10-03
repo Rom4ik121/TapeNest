@@ -21,6 +21,7 @@ import (
 	"github.com/tapenest/tapenest/services/download-service/internal/config"
 	"github.com/tapenest/tapenest/services/download-service/internal/cookies"
 	"github.com/tapenest/tapenest/services/download-service/internal/domain"
+	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 	"github.com/tapenest/tapenest/services/download-service/internal/mq"
 	"github.com/tapenest/tapenest/services/download-service/internal/netguard"
 	"github.com/tapenest/tapenest/services/download-service/internal/proxy"
@@ -28,6 +29,15 @@ import (
 	"github.com/tapenest/tapenest/services/download-service/internal/service"
 	"github.com/tapenest/tapenest/services/download-service/internal/ytdlp"
 )
+
+func editorOrNil(log *slog.Logger, loc string) service.Editor {
+	ff, err := ffmpeg.New(loc)
+	if err != nil {
+		log.Warn("ffmpeg unavailable, frame posters are off", "err", err)
+		return nil
+	}
+	return ff
+}
 
 func main() {
 	importCookies := flag.Bool("import-cookies", false, "store cookies: -import-cookies <youtube|vk|rutube> <cookies.txt>")
@@ -96,7 +106,8 @@ func run() error {
 		Fetch:   &ytdlp.Runner{Bin: cfg.YtDlpPath, JSRuntimes: cfg.YtDlpJSRuntimes, FFmpeg: cfg.FFmpegLocation},
 		Limiter: mq.NewSemaphores(infra.Redis, cfg.DomainLimits(), cfg.JobTimeout+time.Minute),
 		Locker:  mq.NewLocks(infra.Redis), Plans: mq.NewPlans(infra.Redis), Guard: netguard.New(),
-		Cookies: cookies.New(infra.Redis, cfg.CookiesMaxAge), Proxies: pools, Log: log,
+		Cookies: cookies.New(infra.Redis, cfg.CookiesMaxAge), Proxies: pools,
+		Editor: editorOrNil(log, cfg.FFmpegLocation), Log: log,
 	})
 	go pools.Run(ctx, cfg.ProxyHealthURL, cfg.ProxyHealthEvery, log)
 

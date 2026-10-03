@@ -11,6 +11,7 @@ import (
 
 	"github.com/tapenest/tapenest/services/download-service/internal/cookies"
 	"github.com/tapenest/tapenest/services/download-service/internal/domain"
+	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 	"github.com/tapenest/tapenest/services/download-service/internal/mq"
 	"github.com/tapenest/tapenest/services/download-service/internal/repo"
 	"github.com/tapenest/tapenest/services/download-service/internal/ytdlp"
@@ -32,6 +33,17 @@ type Store interface {
 	GetMedia(ctx context.Context, id uuid.UUID) (domain.Media, error)
 	GetMediaByHash(ctx context.Context, hash string) (domain.Media, error)
 	UpsertMedia(ctx context.Context, m domain.Media) (domain.Media, error)
+	RenameJob(ctx context.Context, userID, id uuid.UUID, title string) (domain.Job, error)
+	SoftDeleteJob(ctx context.Context, userID, id uuid.UUID) (domain.Job, error)
+	CountLiveMediaRefs(ctx context.Context, mediaID uuid.UUID) (int, error)
+	SetPosterKey(ctx context.Context, mediaID uuid.UUID, key string) error
+}
+
+// Editor trims, grabs a frame, and renders a timeline with the ffmpeg already used by yt-dlp.
+type Editor interface {
+	Poster(ctx context.Context, src, dst string) error
+	Trim(ctx context.Context, src, dst string, start, end time.Duration) error
+	Compose(ctx context.Context, spec ffmpeg.ComposeSpec, dst string) error
 }
 
 // Queue schedules jobs (mq.Queue).
@@ -56,6 +68,10 @@ type Files interface {
 	Exists(ctx context.Context, key string) (bool, error)
 	PresignInternal(ctx context.Context, key, fileName string, ttl time.Duration) (string, error)
 	PresignPublic(ctx context.Context, key, fileName string, ttl time.Duration) (string, error)
+	// PresignInline is a browser-playable GET without Content-Disposition: attachment.
+	PresignInline(ctx context.Context, key string, ttl time.Duration) (string, error)
+	Open(ctx context.Context, key string) (io.ReadCloser, error)
+	Remove(ctx context.Context, key string) error
 }
 
 // Fetcher runs yt-dlp (ytdlp.Runner).

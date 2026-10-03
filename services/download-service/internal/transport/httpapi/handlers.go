@@ -30,6 +30,7 @@ type JobDTO struct {
 	Attempts     int              `json:"attempts"`
 	ErrorKind    string           `json:"errorKind,omitempty"`
 	ErrorMessage string           `json:"errorMessage,omitempty"`
+	PosterURL    string           `json:"posterUrl,omitempty"`
 	File         *FileDTO         `json:"file,omitempty"`
 	CreatedAt    time.Time        `json:"createdAt"`
 	UpdatedAt    time.Time        `json:"updatedAt"`
@@ -49,15 +50,19 @@ type FileDTO struct {
 
 func toDTO(v service.View) JobDTO {
 	j := v.Job
+	title := j.VisibleTitle()
 	d := JobDTO{
 		ID: j.ID.String(), URL: j.Normalized, Source: string(j.Source), Status: string(j.Status), Stage: string(j.Stage),
-		Progress: v.Progress, Title: j.Title, Attempts: j.Attempts, ErrorKind: string(j.ErrorKind),
-		CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt, FinishedAt: j.FinishedAt,
+		Progress: v.Progress, Title: title, Attempts: j.Attempts, ErrorKind: string(j.ErrorKind),
+		PosterURL: v.PosterURL, CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt, FinishedAt: j.FinishedAt,
 	}
 	if j.Status == domain.StatusFailed {
 		d.ErrorMessage = j.ErrorMessage
 	}
 	if f := v.File; f != nil {
+		if d.Title == "" {
+			d.Title = f.Title
+		}
 		d.File = &FileDTO{
 			FileName: service.FileName(f.Title, f.ExternalID, f.MimeType), SizeBytes: f.SizeBytes, MimeType: f.MimeType,
 			DurationSec: f.DurationSec, Width: f.Width, Height: f.Height, ExpiresAt: f.ExpiresAt,
@@ -98,6 +103,16 @@ func (h *handlers) serviceError(w http.ResponseWriter, r *http.Request, op strin
 		writeError(w, http.StatusConflict, CodeNotReady, "download is not finished")
 	case errors.Is(err, service.ErrNoPublicURL):
 		writeError(w, http.StatusServiceUnavailable, CodeNoPublicURL, "public file links are not configured")
+	case errors.Is(err, service.ErrBadTitle):
+		writeError(w, http.StatusBadRequest, CodeInvalid, "title must be 1–120 characters")
+	case errors.Is(err, service.ErrBadRange):
+		writeError(w, http.StatusBadRequest, CodeInvalid, "trim needs a start and an end at least 1 second apart, inside the video")
+	case errors.Is(err, service.ErrBadProject):
+		writeError(w, http.StatusBadRequest, CodeTimeline, "the timeline is not valid")
+	case errors.Is(err, service.ErrEditFailed):
+		writeError(w, http.StatusUnprocessableEntity, CodeEditFailed, "could not trim this video")
+	case errors.Is(err, service.ErrEditUnavailable):
+		writeError(w, http.StatusServiceUnavailable, CodeEditUnavailable, "trimming is not available on this server")
 	default:
 		h.d.Log.ErrorContext(r.Context(), op+" failed", "err", err, "request_id", w.Header().Get("X-Request-Id"))
 		writeError(w, http.StatusInternalServerError, CodeInternal, "internal error")
@@ -291,4 +306,75 @@ func (h *handlers) file(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, u, http.StatusFound) //nolint:gosec // u is our own presigned MinIO URL, not user input
+}
+
+type titleReq struct {
+	Title string `json:"title"`
+}
+
+func (h *handlers) rename(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req titleReq
+	if !decode(w, r, &req) {
+		return
+	}
+	v, err := h.d.API.Rename(r.Context(), userFrom(r.Context()), id, req.Title)
+	if err != nil {
+		h.serviceError(w, r, "rename", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toDTO(v))
+}
+
+func (h *handlers) remove(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.d.API.Delete(r.Context(), userFrom(r.Context()), id); err != nil {
+		h.serviceError(w, r, "delete", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type trimReq struct {
+	StartSec float64 `json:"startSec"`
+	EndSec   float64 `json:"endSec"`
+}
+
+func (h *handlers) trim(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req trimReq
+	if !decode(w, r, &req) {
+		return
+	}
+	v, err := h.d.API.Trim(r.Context(), userFrom(r.Context()), id, req.StartSec, req.EndSec)
+	if err != nil {
+		h.serviceError(w, r, "trim", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toDTO(v))
+}
+
+func (h *handlers) compose(w http.ResponseWriter, r *http.Request) {
+	var req service.Project
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalid, "invalid JSON body")
+		return
+	}
+	v, err := h.d.API.Compose(r.Context(), userFrom(r.Context()), req)
+	if err != nil {
+		h.serviceError(w, r, "compose", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toDTO(v))
 }

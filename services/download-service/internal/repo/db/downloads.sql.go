@@ -12,11 +12,23 @@ import (
 	"github.com/google/uuid"
 )
 
+const countLiveMediaRefs = `-- name: CountLiveMediaRefs :one
+SELECT count(*)::int FROM download.jobs WHERE media_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) CountLiveMediaRefs(ctx context.Context, mediaID *uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countLiveMediaRefs, mediaID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countUserJobs = `-- name: CountUserJobs :one
-SELECT count(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active,
+SELECT count(*) FILTER (WHERE status IN ('queued', 'running') AND deleted_at IS NULL)::int AS active,
        count(*) FILTER (WHERE created_at > $1::timestamptz)::int AS recent
 FROM download.jobs
-WHERE user_id = $2 AND (status IN ('queued', 'running') OR created_at > $1::timestamptz)
+WHERE user_id = $2
+  AND (status IN ('queued', 'running') OR created_at > $1::timestamptz)
 `
 
 type CountUserJobsParams struct {
@@ -37,8 +49,8 @@ func (q *Queries) CountUserJobs(ctx context.Context, arg CountUserJobsParams) (C
 }
 
 const findActiveUserJob = `-- name: FindActiveUserJob :one
-SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at FROM download.jobs
-WHERE user_id = $1 AND url_hash = $2 AND status IN ('queued', 'running')
+SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at FROM download.jobs
+WHERE user_id = $1 AND url_hash = $2 AND status IN ('queued', 'running') AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -73,6 +85,8 @@ func (q *Queries) FindActiveUserJob(ctx context.Context, arg FindActiveUserJobPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -82,7 +96,7 @@ UPDATE download.jobs
 SET status = 'done', stage = '', media_id = $2, title = $3, error_kind = '', error_message = '',
     updated_at = now(), finished_at = now()
 WHERE id = $1 AND status IN ('queued', 'running')
-RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at
 `
 
 type FinishDoneParams struct {
@@ -116,6 +130,8 @@ func (q *Queries) FinishDone(ctx context.Context, arg FinishDoneParams) (Downloa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -124,7 +140,7 @@ const finishFailed = `-- name: FinishFailed :one
 UPDATE download.jobs
 SET status = 'failed', stage = '', error_kind = $2, error_message = $3, updated_at = now(), finished_at = now()
 WHERE id = $1 AND status IN ('queued', 'running')
-RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at
 `
 
 type FinishFailedParams struct {
@@ -158,12 +174,14 @@ func (q *Queries) FinishFailed(ctx context.Context, arg FinishFailedParams) (Dow
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getJob = `-- name: GetJob :one
-SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at FROM download.jobs WHERE id = $1
+SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at FROM download.jobs WHERE id = $1
 `
 
 func (q *Queries) GetJob(ctx context.Context, id uuid.UUID) (DownloadJob, error) {
@@ -191,12 +209,14 @@ func (q *Queries) GetJob(ctx context.Context, id uuid.UUID) (DownloadJob, error)
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getMedia = `-- name: GetMedia :one
-SELECT id, url_hash, normalized_url, source, external_id, title, duration_sec, width, height, format_id, object_key, size_bytes, mime_type, thumbnail_url, created_at, expires_at FROM download.media WHERE id = $1
+SELECT id, url_hash, normalized_url, source, external_id, title, duration_sec, width, height, format_id, object_key, size_bytes, mime_type, thumbnail_url, created_at, expires_at, poster_key FROM download.media WHERE id = $1
 `
 
 func (q *Queries) GetMedia(ctx context.Context, id uuid.UUID) (DownloadMedium, error) {
@@ -219,12 +239,13 @@ func (q *Queries) GetMedia(ctx context.Context, id uuid.UUID) (DownloadMedium, e
 		&i.ThumbnailUrl,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.PosterKey,
 	)
 	return i, err
 }
 
 const getMediaByHash = `-- name: GetMediaByHash :one
-SELECT id, url_hash, normalized_url, source, external_id, title, duration_sec, width, height, format_id, object_key, size_bytes, mime_type, thumbnail_url, created_at, expires_at FROM download.media WHERE url_hash = $1 AND expires_at > now()
+SELECT id, url_hash, normalized_url, source, external_id, title, duration_sec, width, height, format_id, object_key, size_bytes, mime_type, thumbnail_url, created_at, expires_at, poster_key FROM download.media WHERE url_hash = $1 AND expires_at > now()
 `
 
 func (q *Queries) GetMediaByHash(ctx context.Context, urlHash string) (DownloadMedium, error) {
@@ -247,12 +268,13 @@ func (q *Queries) GetMediaByHash(ctx context.Context, urlHash string) (DownloadM
 		&i.ThumbnailUrl,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.PosterKey,
 	)
 	return i, err
 }
 
 const getUserJob = `-- name: GetUserJob :one
-SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at FROM download.jobs WHERE user_id = $1 AND id = $2
+SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at FROM download.jobs WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
 type GetUserJobParams struct {
@@ -285,6 +307,8 @@ func (q *Queries) GetUserJob(ctx context.Context, arg GetUserJobParams) (Downloa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -293,7 +317,7 @@ const insertJob = `-- name: InsertJob :one
 INSERT INTO download.jobs (user_id, id, url, normalized_url, url_hash, source, status, priority,
                            media_id, title, chat_id, status_message_id, reply_to_message_id, lang, finished_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at
 `
 
 type InsertJobParams struct {
@@ -355,13 +379,16 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (DownloadJ
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const listUserJobs = `-- name: ListUserJobs :many
-SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at FROM download.jobs
+SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at FROM download.jobs
 WHERE user_id = $1
+  AND deleted_at IS NULL
   AND ($2::timestamptz IS NULL
        OR (created_at, id) < ($2::timestamptz, $3::uuid))
 ORDER BY created_at DESC, id DESC
@@ -411,6 +438,8 @@ func (q *Queries) ListUserJobs(ctx context.Context, arg ListUserJobsParams) ([]D
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.FinishedAt,
+			&i.DisplayTitle,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -426,7 +455,7 @@ const markRunning = `-- name: MarkRunning :one
 UPDATE download.jobs
 SET status = 'running', stage = $2, attempts = attempts + 1, updated_at = now()
 WHERE id = $1 AND status IN ('queued', 'running')
-RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at
 `
 
 type MarkRunningParams struct {
@@ -459,6 +488,52 @@ func (q *Queries) MarkRunning(ctx context.Context, arg MarkRunningParams) (Downl
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const renameJob = `-- name: RenameJob :one
+UPDATE download.jobs
+SET display_title = $3, updated_at = now()
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL AND status = 'done'
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at
+`
+
+type RenameJobParams struct {
+	UserID       uuid.UUID
+	ID           uuid.UUID
+	DisplayTitle string
+}
+
+func (q *Queries) RenameJob(ctx context.Context, arg RenameJobParams) (DownloadJob, error) {
+	row := q.db.QueryRow(ctx, renameJob, arg.UserID, arg.ID, arg.DisplayTitle)
+	var i DownloadJob
+	err := row.Scan(
+		&i.UserID,
+		&i.ID,
+		&i.Url,
+		&i.NormalizedUrl,
+		&i.UrlHash,
+		&i.Source,
+		&i.Status,
+		&i.Stage,
+		&i.Priority,
+		&i.Attempts,
+		&i.ErrorKind,
+		&i.ErrorMessage,
+		&i.MediaID,
+		&i.Title,
+		&i.ChatID,
+		&i.StatusMessageID,
+		&i.ReplyToMessageID,
+		&i.Lang,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -467,7 +542,7 @@ const requeue = `-- name: Requeue :one
 UPDATE download.jobs
 SET status = 'queued', stage = '', priority = $2, error_kind = $3, error_message = $4, updated_at = now()
 WHERE id = $1 AND status IN ('queued', 'running')
-RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at
 `
 
 type RequeueParams struct {
@@ -507,8 +582,24 @@ func (q *Queries) Requeue(ctx context.Context, arg RequeueParams) (DownloadJob, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const setPosterKey = `-- name: SetPosterKey :exec
+UPDATE download.media SET poster_key = $2 WHERE id = $1
+`
+
+type SetPosterKeyParams struct {
+	ID        uuid.UUID
+	PosterKey string
+}
+
+func (q *Queries) SetPosterKey(ctx context.Context, arg SetPosterKeyParams) error {
+	_, err := q.db.Exec(ctx, setPosterKey, arg.ID, arg.PosterKey)
+	return err
 }
 
 const setStage = `-- name: SetStage :exec
@@ -527,17 +618,61 @@ func (q *Queries) SetStage(ctx context.Context, arg SetStageParams) error {
 	return err
 }
 
+const softDeleteJob = `-- name: SoftDeleteJob :one
+UPDATE download.jobs
+SET deleted_at = now(), updated_at = now()
+WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at
+`
+
+type SoftDeleteJobParams struct {
+	UserID uuid.UUID
+	ID     uuid.UUID
+}
+
+func (q *Queries) SoftDeleteJob(ctx context.Context, arg SoftDeleteJobParams) (DownloadJob, error) {
+	row := q.db.QueryRow(ctx, softDeleteJob, arg.UserID, arg.ID)
+	var i DownloadJob
+	err := row.Scan(
+		&i.UserID,
+		&i.ID,
+		&i.Url,
+		&i.NormalizedUrl,
+		&i.UrlHash,
+		&i.Source,
+		&i.Status,
+		&i.Stage,
+		&i.Priority,
+		&i.Attempts,
+		&i.ErrorKind,
+		&i.ErrorMessage,
+		&i.MediaID,
+		&i.Title,
+		&i.ChatID,
+		&i.StatusMessageID,
+		&i.ReplyToMessageID,
+		&i.Lang,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+		&i.DisplayTitle,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const upsertMedia = `-- name: UpsertMedia :one
 INSERT INTO download.media (id, url_hash, normalized_url, source, external_id, title, duration_sec, width, height,
-                            format_id, object_key, size_bytes, mime_type, thumbnail_url, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                            format_id, object_key, size_bytes, mime_type, thumbnail_url, poster_key, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (url_hash) DO UPDATE
 SET normalized_url = EXCLUDED.normalized_url, title = EXCLUDED.title,
     duration_sec = EXCLUDED.duration_sec, width = EXCLUDED.width, height = EXCLUDED.height,
     format_id = EXCLUDED.format_id, object_key = EXCLUDED.object_key, size_bytes = EXCLUDED.size_bytes,
     mime_type = EXCLUDED.mime_type, thumbnail_url = EXCLUDED.thumbnail_url,
+    poster_key = CASE WHEN EXCLUDED.poster_key <> '' THEN EXCLUDED.poster_key ELSE download.media.poster_key END,
     created_at = now(), expires_at = EXCLUDED.expires_at
-RETURNING id, url_hash, normalized_url, source, external_id, title, duration_sec, width, height, format_id, object_key, size_bytes, mime_type, thumbnail_url, created_at, expires_at
+RETURNING id, url_hash, normalized_url, source, external_id, title, duration_sec, width, height, format_id, object_key, size_bytes, mime_type, thumbnail_url, created_at, expires_at, poster_key
 `
 
 type UpsertMediaParams struct {
@@ -555,6 +690,7 @@ type UpsertMediaParams struct {
 	SizeBytes     int64
 	MimeType      string
 	ThumbnailUrl  string
+	PosterKey     string
 	ExpiresAt     time.Time
 }
 
@@ -574,6 +710,7 @@ func (q *Queries) UpsertMedia(ctx context.Context, arg UpsertMediaParams) (Downl
 		arg.SizeBytes,
 		arg.MimeType,
 		arg.ThumbnailUrl,
+		arg.PosterKey,
 		arg.ExpiresAt,
 	)
 	var i DownloadMedium
@@ -594,6 +731,7 @@ func (q *Queries) UpsertMedia(ctx context.Context, arg UpsertMediaParams) (Downl
 		&i.ThumbnailUrl,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.PosterKey,
 	)
 	return i, err
 }

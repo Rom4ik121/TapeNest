@@ -28,7 +28,7 @@ type Downloader interface {
 // MiniApps are the mini app URLs shown as web_app buttons.
 type MiniApps struct {
 	WavePlayer string
-	CineNest   string // optional
+	Videos     string // library of this user's downloads; optional
 }
 
 // Bot handles updates.
@@ -51,25 +51,19 @@ func (b *Bot) Commands(l i18n.Lang) []telegram.BotCommand {
 		{Command: "start", Description: b.texts.T(l, "commands.start")},
 		{Command: "help", Description: b.texts.T(l, "commands.help")},
 	}
-	if b.apps.CineNest != "" {
-		cmds = append(cmds, telegram.BotCommand{Command: "cinema", Description: b.texts.T(l, "commands.cinema")})
+	if b.apps.Videos != "" {
+		cmds = append(cmds, telegram.BotCommand{Command: "videos", Description: b.texts.T(l, "commands.videos")})
 	}
 	return cmds
-}
-
-func (b *Bot) cinemaKeyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
-	return &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{
-		{Text: b.texts.T(l, "button.cinenest"), WebApp: &telegram.WebAppInfo{URL: b.apps.CineNest}},
-	}}}
 }
 
 func (b *Bot) keyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
 	rows := [][]telegram.InlineKeyboardButton{{
 		{Text: b.texts.T(l, "button.waveplayer"), WebApp: &telegram.WebAppInfo{URL: b.apps.WavePlayer}},
 	}}
-	if b.apps.CineNest != "" {
+	if b.apps.Videos != "" {
 		rows = append(rows, []telegram.InlineKeyboardButton{
-			{Text: b.texts.T(l, "button.cinenest"), WebApp: &telegram.WebAppInfo{URL: b.apps.CineNest}},
+			{Text: b.texts.T(l, "button.videos"), WebApp: &telegram.WebAppInfo{URL: b.apps.Videos}},
 		})
 	}
 	return &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -115,11 +109,11 @@ func (b *Bot) command(ctx context.Context, m *telegram.Message, lang i18n.Lang, 
 		return b.reply(ctx, m, text, true)
 	case "help":
 		return b.reply(ctx, m, b.texts.T(lang, "help.text", "sources", links.SourceNames()), true)
-	case "cinema", "cinenest":
-		if b.apps.CineNest == "" {
-			return b.reply(ctx, m, b.texts.T(lang, "cinema.unavailable"), false)
-		}
-		return b.send(ctx, m, b.texts.T(lang, "cinema.open"), b.cinemaKeyboard(lang))
+	case "videos", "video":
+		return b.reply(ctx, m, b.texts.T(lang, "videos.open"), true)
+	case "cinema", "cinenest", "film", "films", "movie", "movies":
+		// Cinema is gone. Point at a pasted link and the download library.
+		return b.reply(ctx, m, b.texts.T(lang, "videos.noCinema"), true)
 	default:
 		return b.reply(ctx, m, b.texts.T(lang, "command.unknown"), false)
 	}

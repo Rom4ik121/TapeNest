@@ -26,8 +26,9 @@ type Config struct {
 	SetupOnStart  bool   `env:"BOT_SETUP_ON_START" env-default:"true"`
 
 	WavePlayerURL string `env:"MINIAPP_WAVEPLAYER_URL" env-required:"true"`
-	CineNestURL   string `env:"MINIAPP_CINENEST_URL"`
-	MenuButton    string `env:"BOT_MENU_BUTTON_TEXT" env-default:"WavePlayer"`
+	// VideosURL opens the download library. Empty derives WavePlayerURL + #/videos.
+	VideosURL  string `env:"MINIAPP_VIDEOS_URL"`
+	MenuButton string `env:"BOT_MENU_BUTTON_TEXT" env-default:"WavePlayer"`
 
 	GatewayURL     string        `env:"GATEWAY_URL" env-required:"true"`
 	InternalToken  string        `env:"INTERNAL_API_TOKEN" env-required:"true"`
@@ -66,7 +67,7 @@ func (c *Config) validate() error {
 	if !strings.HasPrefix(c.WebhookPath, "/") {
 		errs = append(errs, errors.New("TELEGRAM_WEBHOOK_PATH must start with /"))
 	}
-	mustHTTPS := map[string]string{"MINIAPP_WAVEPLAYER_URL": c.WavePlayerURL, "MINIAPP_CINENEST_URL": c.CineNestURL}
+	mustHTTPS := map[string]string{"MINIAPP_WAVEPLAYER_URL": c.WavePlayerURL, "MINIAPP_VIDEOS_URL": c.VideosURL}
 	if c.SetupOnStart {
 		mustHTTPS["TELEGRAM_WEBHOOK_URL"] = c.WebhookURL
 		if c.WebhookURL == "" {
@@ -87,5 +88,14 @@ func (c *Config) validate() error {
 	if u, err := url.Parse(c.GatewayURL); err != nil || u.Host == "" {
 		errs = append(errs, errors.New("GATEWAY_URL must be a URL"))
 	}
-	return errors.Join(errs...)
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	if c.VideosURL == "" {
+		if u, err := url.Parse(c.WavePlayerURL); err == nil && u.Scheme == "https" && u.Host != "" {
+			u.Fragment = "/videos"
+			c.VideosURL = u.String()
+		}
+	}
+	return nil
 }

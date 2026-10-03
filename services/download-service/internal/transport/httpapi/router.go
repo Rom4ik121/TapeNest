@@ -32,6 +32,9 @@ const (
 	CodeNotFound        = "NOT_FOUND"
 	CodeNotReady        = "NOT_READY"
 	CodeNoPublicURL     = "PUBLIC_LINKS_DISABLED"
+	CodeEditFailed      = "EDIT_FAILED"
+	CodeEditUnavailable = "EDIT_UNAVAILABLE"
+	CodeTimeline        = "TIMELINE_INVALID"
 	CodeInternal        = "INTERNAL"
 	CodeUnavailableDeps = "SERVICE_UNAVAILABLE"
 )
@@ -83,8 +86,12 @@ func NewRouter(d Deps) http.Handler {
 		r.Route("/api/v1/downloads", func(r chi.Router) {
 			r.Use(h.requireUser)
 			r.Post("/", h.create)
+			r.Post("/compose", h.compose)
 			r.Get("/", h.list)
 			r.Get("/{id}", h.get)
+			r.Patch("/{id}", h.rename)
+			r.Delete("/{id}", h.remove)
+			r.Post("/{id}/trim", h.trim)
 			r.Get("/{id}/events", h.events)
 			r.Get("/{id}/file", h.file)
 		})

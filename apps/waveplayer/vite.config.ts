@@ -16,9 +16,6 @@ export default defineConfig(({ mode }) => {
   const proxy = {
     '/api': { target: env.GATEWAY_URL || 'http://127.0.0.1:8080', changeOrigin: false, xfwd: true },
     '/tg': { target: env.BOT_SERVICE_URL || 'http://127.0.0.1:8081', changeOrigin: false, xfwd: true },
-    // CineNest mini app lives under /cinenest/ on the same origin (ADR 0007): its own
-    // Vite dev server (base /cinenest/) on :5174; ws for its HMR socket.
-    '/cinenest': { target: env.CINENEST_URL || 'http://127.0.0.1:5174', changeOrigin: false, ws: true },
     '/hls': { target: env.STREAMING_URL || 'http://127.0.0.1:8094', changeOrigin: false },
     // Presigned MinIO links for downloads > 50 MB (ADR 0008): the signature covers the
     // public Host, so it must reach MinIO unchanged (changeOrigin: false).

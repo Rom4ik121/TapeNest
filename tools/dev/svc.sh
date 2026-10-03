@@ -30,7 +30,7 @@ case "$cmd" in
       legal-indexer) start_legal_indexer ;;
       vite) start_vite "${url#https://}" ;;
       cinenest) start_cinenest "${url#https://}" ;;
-      ngrok) NGROK_RESTART=1 start_ngrok; url="$(ngrok_url)"; start_vite "${url#https://}"; start_cinenest "${url#https://}"; start_bot "$url"; start_download "$url" ;;
+      ngrok) NGROK_RESTART=1 start_ngrok; url="$(ngrok_url)"; start_vite "${url#https://}"; start_bot "$url"; start_download "$url" ;;
       url-watch) start_watch ;;
       *) echo "unknown component: $name" >&2; exit 2 ;;
     esac ;;

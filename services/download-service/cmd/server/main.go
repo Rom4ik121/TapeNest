@@ -17,12 +17,22 @@ import (
 
 	"github.com/tapenest/tapenest/services/download-service/internal/app"
 	"github.com/tapenest/tapenest/services/download-service/internal/config"
+	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 	"github.com/tapenest/tapenest/services/download-service/internal/mq"
 	"github.com/tapenest/tapenest/services/download-service/internal/netguard"
 	"github.com/tapenest/tapenest/services/download-service/internal/repo"
 	"github.com/tapenest/tapenest/services/download-service/internal/service"
 	"github.com/tapenest/tapenest/services/download-service/internal/transport/httpapi"
 )
+
+func editorOrNil(log *slog.Logger, loc string) service.Editor {
+	ff, err := ffmpeg.New(loc)
+	if err != nil {
+		log.Warn("ffmpeg unavailable, trim, export and frame posters are off", "err", err)
+		return nil
+	}
+	return ff
+}
 
 func main() {
 	migrateOnly := flag.Bool("migrate", false, "apply database migrations and exit")
@@ -64,7 +74,8 @@ func run(migrateOnly bool) error {
 	bus := mq.NewBus(infra.Redis)
 	api := service.NewAPI(service.APIDeps{
 		Store: repo.NewStore(infra.Pool), Queue: queue, Bus: bus, Files: infra.S3, Guard: netguard.New(),
-		Quotas: service.Quotas{Active: cfg.QuotaActive, Daily: cfg.QuotaDaily}, PresignTTL: cfg.PresignTTL, Log: log,
+		Quotas: service.Quotas{Active: cfg.QuotaActive, Daily: cfg.QuotaDaily}, PresignTTL: cfg.PresignTTL,
+		Editor: editorOrNil(log, cfg.FFmpegLocation), Log: log,
 	})
 	handler := httpapi.NewRouter(httpapi.Deps{
 		API: api, Bus: bus, InternalToken: cfg.InternalToken, Log: log,
