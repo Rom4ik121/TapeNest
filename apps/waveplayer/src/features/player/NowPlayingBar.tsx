@@ -69,7 +69,9 @@ export function NowPlayingBar() {
         </button>
       </div>
       <div className="h-[3px] bg-fg/10">
+        {/* New node per track so the fill snaps to 0 instead of easing down from the previous track. */}
         <div
+          key={track.id}
           className="h-full bg-grad-02 transition-[width] duration-300 ease-linear"
           style={{ width: `${progress}%` }}
         />
