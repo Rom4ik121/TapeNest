@@ -4,15 +4,14 @@
 > Каждый сеанс: начал с чтения этого файла → работал → обновил этот файл.
 > Легенда: `[ ]` не начато · `[~]` в работе · `[x]` завершено
 
-_Последнее обновление: 2026-10-02 (CineNest streaming-service, ADR 0013)_
+_Последнее обновление: 2026-10-03 (сняты кино и торренты, ADR 0014)_
 
 ## Текущее состояние
 
-- **Этап:** 4. CineNest читает streaming-service (ADR 0013): вымышленный каталог в Postgres,
-  позиции, «смотреть позже», HLS-превью (сгенерированный тест, не фильм). TorrServer
-  вызывается только если у файла уже есть magnet и `CONTENT_SOURCES` включает p2p.
-  Музыка по-прежнему YouTube Music (ADR 0012), торренты — запасной путь (ADR 0011).
-  Индексеры в Prowlarr оператор добавляет сам.
+- **Поверхность:** Telegram-бот, WavePlayer (YouTube Music + локальная библиотека Navidrome),
+  reco-service («Моя волна»), скачивание ссылок пользователя (download-service).
+  Кино, CineNest, streaming-service, acquisition-service, TorrServer и *arr сняты (ADR 0014).
+  Редактора скачанных видео в репозитории нет — не добавлять.
 - **Готовые артефакты:**
   - `services/api-gateway`: initData → JWT, refresh с ротацией, Redis rate limit, прокси-каркас.
     OpenAPI: `docs/api/gateway.openapi.yaml`.
@@ -34,29 +33,30 @@ _Последнее обновление: 2026-10-02 (CineNest streaming-service
     эвристика). OpenAPI: `docs/api/reco.openapi.yaml`; офлайн-оценка — `docs/reco/`.
   - `apps/waveplayer`: реальные gateway и music-service (dev по умолчанию без моков;
     `VITE_USE_MOCKS=music|all` оставлены).
-  - `apps/cinenest`: авторизация и `/cinema/*` через реальный gateway → streaming-service;
-    моки только при `VITE_USE_MOCKS=cinema`. Отдаётся по пути `/cinenest/`.
-  - `services/streaming-service`: API :8094 + воркер :8095. OpenAPI `docs/api/cinema.openapi.yaml` 0.2.0.
   - Контракт WavePlayer: `docs/api/waveplayer-contract.md` + `waveplayer.openapi.yaml`.
-  - Контракт CineNest: `docs/api/cinema.openapi.yaml`.
-- **Последний ADR:** 0013 (`docs/adr/`).
+- **Последний ADR:** 0014 (`docs/adr/`). Снято: CineNest, `/api/v1/cinema/*`, streaming-service,
+  acquisition-service, TorrServer, Lidarr/Prowlarr/qBittorrent, legal-indexer, схема `bot`
+  (у bot-service нет базы), неиспользуемые `MINIAPP_CINENEST_URL`, `MINIAPP_MEDIAHUB_URL`, `CSAM_*`.
 - **Dev-запуск:** `make miniapp-up` / `make miniapp-down` / `make stack-status`.
   - Процессы: PG/Redis/MinIO/Navidrome :4533 (нативно), gateway :8080, bot-service :8081,
     download-service :8082, download-worker (health :8083), music-service :8084,
-    music-worker (health :8085), reco-service :8086, reco-worker (health :8087), Vite :5173, CineNest Vite :5174, ngrok, url-watch.
+    music-worker (health :8085), reco-service :8086, reco-worker (health :8087), Vite :5173, ngrok, url-watch.
   - Демо-музыка: `make music-seed` — 134 трека CC0/public domain в 24 альбомах (Musopen и др.
     через Wikimedia Commons; лицензия каждого файла проверяется через Commons API), `$MUSIC_DIR/CREDITS.md`.
   - Перезапуск одного сервиса: `tools/dev/svc.sh restart <gateway|music|reco|…>`.
-  - Один публичный URL: `/` → Vite, `/cinenest/` → CineNest, `/api` → gateway,
-    `/tg/webhook` → бот, `/media/` → MinIO (ADR 0005, 0007, 0008).
+  - Один публичный URL: `/` → Vite, `/api` → gateway,
+    `/tg/webhook` → бот, `/media/` → MinIO (ADR 0005, 0008).
   - Логи и pid-файлы: `/workspace/logs`.
 
 ## Чек-лист этапов (по разделу 16 ТЗ)
 
+Пункты про CineNest, streaming-service и acquisition ниже — журнал снятого кода.
+Текущая поверхность — раздел «Текущее состояние» и ADR 0014.
+
 ### Этап 0. Фундамент
 - [x] Каркас monorepo (services/*, apps/*, deploy/, docs/adr/, tools/); `apps/deploy/{grafana,k8s}` → `deploy/`; корневой `.gitignore`, `README.md`
 - [x] Makefile (dev/test/lint/build/infra-*/compose-config/initdata/miniapp-*) — `make help`
-- [x] deploy/docker-compose.dev.yml (PG 16, Redis 7.4, MinIO, Navidrome, TorrServer; профили `observability` = Prometheus+Grafana, `edge` = Nginx; образы закреплены по digest) — проверено только `docker-compose config -q` (Docker на машине недоступен)
+- [x] deploy/docker-compose.dev.yml (PG 16, Redis 7.4, MinIO, Navidrome; профили `observability` = Prometheus+Grafana, `edge` = Nginx; образы закреплены по digest). TorrServer снят (ADR 0014).
 - [x] .env.example (только имена переменных)
 - [x] CI (.github/workflows/ci.yml: фронтенд lint/typecheck/test/build, Go-матрица пропускается без go.mod, compose config, secrets-guard) — `actionlint` OK
 - [x] tools/initdata-mock (Go, stdlib: подпись/валидация initData, тесты) — `make initdata`, `make go-test`
@@ -225,7 +225,7 @@ _Последнее обновление: 2026-10-02 (CineNest streaming-service
 - [x] Браузер через ngrok (Playwright, светлая и тёмная темы): чипы режимов, объяснения,
   аудио играет, ошибок в консоли нет — `/workspace/shots/v4-*.png`
 
-### Этап 4. CineNest (streaming-service)
+### Этап 4. CineNest (streaming-service) — снято 2026-10-03, ADR 0014
 - [x] TorrServer в compose + Go-клиент REST API (вызывается только при непустом magnet и `CONTENT_SOURCES=p2p`; сид магнитов не содержит)
 - [x] HLS-прокси с переписыванием m3u8 + прокси сегментов (локальное сгенерированное превью, не фильм)
 - [x] Каталог/карточки/поиск/позиции просмотра (вымышленные названия как строки `streaming.titles`)
@@ -406,3 +406,12 @@ _Последнее обновление: 2026-10-02 (CineNest streaming-service
   - TorrServer-клиент есть; 503 `X-Degraded-Dependency: torrserver`, каталог при этом жив. Сид без magnet.
   - CineNest больше не ставит бейдж «Каталог: демо-данные», пока не задан `VITE_USE_MOCKS=cinema`.
   - Отладочный лог `initdata rejected` в api-gateway убран.
+
+- 2026-10-03 — Сняты кино и торренты (ADR 0014):
+  - Удалены `apps/cinenest`, `services/streaming-service`, `services/acquisition-service`,
+    `tools/legal-indexer`, команды бота `/cinema`, маршруты gateway `/api/v1/cinema/*` и admin acquisition,
+    сервисы compose (torrserver, acquisition, streaming) и переменные `.env.example` этого стека.
+  - Музыка: библиотека Navidrome + YouTube Music (`MUSIC_SOURCES=youtube`). Запасного торрент-пути нет.
+  - Оставлены бот, download-service, music-service, reco-service, Navidrome, MinIO.
+  - Редактор скачанных видео не добавлялся: его в репозитории нет.
+  - Журнал выше описывает то, что было собрано, и не является текущей архитектурой.

@@ -2,8 +2,6 @@
 -- empty data volume. Service roles/grants are added by each service's
 -- golang-migrate migrations in stage 1+.
 CREATE SCHEMA IF NOT EXISTS gateway;
-CREATE SCHEMA IF NOT EXISTS bot;
 CREATE SCHEMA IF NOT EXISTS download;
 CREATE SCHEMA IF NOT EXISTS music;
-CREATE SCHEMA IF NOT EXISTS streaming;
 CREATE EXTENSION IF NOT EXISTS pg_trgm; -- search (spec §5.4)

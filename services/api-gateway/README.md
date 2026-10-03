@@ -34,10 +34,9 @@ Spec: [`docs/api/gateway.openapi.yaml`](../../docs/api/gateway.openapi.yaml).
 | POST | `/api/v1/auth/refresh` | rotation; reuse → `401 REFRESH_REUSED` and the session is revoked |
 | POST | `/api/v1/auth/logout` | revokes the session (refresh family and access tokens) |
 | GET | `/api/v1/me` | current user |
-| * | `/api/v1/{tracks,playlists,wave,events}/*` | → music-service (`MUSIC_SERVICE_URL`, stage 3) |
+| * | `/api/v1/{tracks,playlists,wave,events,search,albums,artists}` | → music-service (`MUSIC_SERVICE_URL`) |
 | GET, HEAD | `/api/v1/stream/*` | → music-service **without JWT** (signed audio/cover links for `<audio>`/`<img>`; music-service checks the HMAC signature; client `X-User-Id` is stripped; ADR 0009) |
 | * | `/api/v1/downloads*` | → download-service (`DOWNLOAD_SERVICE_URL`; SSE passes through; see `download.openapi.yaml`) |
-| * | `/api/v1/cinema/*` | → streaming-service |
 | POST | `/internal/v1/bot/downloads` | bot-service → gateway (Bearer `INTERNAL_API_TOKEN`) |
 
 Rules for the proxied routes:
@@ -62,7 +61,7 @@ Rate limits (Redis token bucket, fail-open):
 `INITDATA_TTL`, `JWT_SECRET`, `JWT_ACCESS_TTL`, `JWT_REFRESH_TTL`, `CORS_ALLOWED_ORIGINS`
 (supports `https://*.ngrok-free.app`), `TRUST_PROXY_HEADERS`, `RATE_LIMIT_RPS/BURST`,
 `AUTH_RATE_LIMIT_RPS/BURST`, `ADMIN_TELEGRAM_IDS`, `INTERNAL_API_TOKEN`,
-`MUSIC_SERVICE_URL`, `DOWNLOAD_SERVICE_URL`, `STREAMING_SERVICE_URL`, `UPSTREAM_TIMEOUT`,
+`MUSIC_SERVICE_URL`, `DOWNLOAD_SERVICE_URL`, `UPSTREAM_TIMEOUT`,
 `MIGRATE_ON_START`.
 
 All of them are documented in [`/.env.example`](../../.env.example).

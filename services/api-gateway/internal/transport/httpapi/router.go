@@ -34,7 +34,6 @@ type Deps struct {
 	Ready         map[string]Pinger
 	Music         *upstream.Service
 	Download      *upstream.Service
-	Streaming     *upstream.Service
 	Now           func() time.Time
 }
 
@@ -73,16 +72,13 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth(d.Auth, d.Log), rateLimit(d.APILimiter, ip, d.Log))
 			r.Get("/me", h.me)
-			// music-service (docs/api/waveplayer.openapi.yaml).
+			// music-service (docs/api/waveplayer.openapi.yaml): library + YouTube Music.
 			music := d.Music.Handler(onUpstreamErr)
-			// /search, /albums, /artists: unified catalog (library + MusicBrainz, ADR 0011);
-			// /admin/*: acquisition status, music-service checks X-User-Role=admin.
-			for _, p := range []string{"/tracks", "/tracks/*", "/playlists", "/playlists/*", "/wave/*", "/events/*", "/search", "/albums/*", "/artists/*", "/admin/*"} {
+			for _, p := range []string{"/tracks", "/tracks/*", "/playlists", "/playlists/*", "/wave/*", "/events/*", "/search", "/albums/*", "/artists/*"} {
 				r.Handle(p, music)
 			}
 			r.Handle("/downloads", d.Download.Handler(onUpstreamErr))
 			r.Handle("/downloads/*", d.Download.Handler(onUpstreamErr))
-			r.Handle("/cinema/*", d.Streaming.Handler(onUpstreamErr))
 		})
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")

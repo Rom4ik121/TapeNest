@@ -24,14 +24,14 @@ gobreaker.
 
 ## How it works
 
-- **Catalog.** Navidrome scans the `/music` volume. In production the Lidarr stack fills it; in
-  dev `make music-seed` does. The worker mirrors it into `music.artists/albums/tracks` (stable
-  UUIDs, soft delete) every `CATALOG_SYNC_INTERVAL`.
-- **YouTube Music (ADR 0012).** `MUSIC_SOURCES` defaults to `youtube,torrent`.
-  Search asks YouTube Music first (songs, albums, artists). A hit is stored as a normal
-  track (`youtube_video_id`) so likes persist. Play proxies audio via yt-dlp
-  (`player_client=android`) and does not save the file. Torrents (ADR 0011) run only when
-  YouTube Music returns nothing. Metrolist/InnerTune are not vendored (GPL-3.0).
+- **Catalog.** Navidrome scans the `/music` volume. Dev fills it with `make music-seed`.
+  The worker mirrors it into `music.artists/albums/tracks` (stable UUIDs, soft delete) every
+  `CATALOG_SYNC_INTERVAL`.
+- **YouTube Music (ADR 0012, amended by 0014).** `MUSIC_SOURCES` defaults to `youtube`.
+  Search merges the local library with YouTube Music (songs, albums, artists). A hit is stored
+  as a normal track (`youtube_video_id`) so likes persist. Play proxies audio via yt-dlp
+  (`player_client=android`) and does not save the file. `MUSIC_SOURCES=library` skips YouTube.
+  There is no torrent fallback. Metrolist/InnerTune are not vendored (GPL-3.0).
 - **Streaming.**
   - `GET /api/v1/tracks/{id}/stream-url` returns a signed relative URL
     `/api/v1/stream/tracks/{id}?exp&u&sig` (HMAC-SHA256, TTL ≤ 1 h).

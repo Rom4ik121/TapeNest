@@ -86,9 +86,9 @@ func run(migrateOnly bool) error {
 	authSvc := auth.NewService(validator, jwtIssuer, refresh, repo.NewUsers(pool), cfg.AdminTelegramIDs)
 
 	uopt := upstream.Options{Timeout: cfg.UpstreamTimeout, InternalToken: cfg.InternalToken}
-	var services [3]*upstream.Service
+	var services [2]*upstream.Service
 	for i, s := range []struct{ name, url string }{
-		{"music", cfg.MusicServiceURL}, {"download", cfg.DownloadServiceURL}, {"streaming", cfg.StreamingServiceURL},
+		{"music", cfg.MusicServiceURL}, {"download", cfg.DownloadServiceURL},
 	} {
 		svc, err := upstream.New(s.name, s.url, uopt, httpapi.UpstreamErrorWriter(log))
 		if err != nil {
@@ -110,7 +110,7 @@ func run(migrateOnly bool) error {
 			"postgres": pool,
 			"redis":    httpapi.PingFunc(func(ctx context.Context) error { return rdb.Ping(ctx).Err() }),
 		},
-		Music: services[0], Download: services[1], Streaming: services[2],
+		Music: services[0], Download: services[1],
 	})
 
 	srv := &http.Server{

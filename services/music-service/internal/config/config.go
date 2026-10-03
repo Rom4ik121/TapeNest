@@ -39,13 +39,11 @@ type Config struct {
 	RecoBreakerFailures uint32        `env:"RECO_BREAKER_FAILURES" env-default:"3"`
 	RecoBreakerOpen     time.Duration `env:"RECO_BREAKER_OPEN" env-default:"30s"`
 
-	// acquisition-service (ADR 0011); empty = library-only search, no acquisition
-	AcquisitionURL string `env:"ACQUISITION_SERVICE_URL"`
-	CoverArtURL    string `env:"COVERART_URL" env-default:"https://coverartarchive.org"`
+	CoverArtURL string `env:"COVERART_URL" env-default:"https://coverartarchive.org"`
 
-	// MUSIC_SOURCES: comma list. youtube is primary (ADR 0012); torrent is the
-	// MusicBrainz/acquisition fallback used only when YouTube Music has no hit.
-	MusicSources string `env:"MUSIC_SOURCES" env-default:"youtube,torrent"`
+	// MUSIC_SOURCES: comma list. youtube is the external catalog (ADR 0012).
+	// library-only: set MUSIC_SOURCES=library.
+	MusicSources string `env:"MUSIC_SOURCES" env-default:"youtube"`
 	YTDLPBin     string `env:"YTDLP_BIN" env-default:"yt-dlp"`
 
 	SyncInterval       time.Duration `env:"CATALOG_SYNC_INTERVAL" env-default:"10m"`
@@ -95,7 +93,7 @@ func (c *Config) finish() error {
 	return errors.Join(errs...)
 }
 
-// SourceEnabled reports whether a catalog source (youtube, torrent) is on.
+// SourceEnabled reports whether a catalog source (youtube) is on.
 func (c *Config) SourceEnabled(name string) bool {
 	for _, p := range strings.Split(strings.ToLower(c.MusicSources), ",") {
 		if strings.TrimSpace(p) == name {

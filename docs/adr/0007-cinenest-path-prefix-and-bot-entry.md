@@ -1,6 +1,6 @@
 # ADR 0007: CineNest is served under `/cinenest/` on the single origin; bot entry points
 
-- Status: accepted
+- Status: Superseded by [0014](0014-drop-cinema-and-torrent-stack.md). CineNest and `/cinema` are removed. Do not rebuild them from this record.
 - Date: 2026-09-25
 - Context: stage 1, CineNest skeleton (AI_DEVELOPMENT_INSTRUCTION.md), ADR 0005 (single dev tunnel)
 

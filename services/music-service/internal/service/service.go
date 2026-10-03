@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tapenest/tapenest/services/music-service/internal/acq"
 	"github.com/tapenest/tapenest/services/music-service/internal/domain"
 	"github.com/tapenest/tapenest/services/music-service/internal/mq"
 	"github.com/tapenest/tapenest/services/music-service/internal/navidrome"
@@ -57,47 +56,11 @@ type Library struct {
 	store   Store
 	now     func() time.Time
 	publish func(ctx context.Context, e mq.UserEvent)
-	acq     Acquirer
-	log     *slog.Logger
-	bg      func(fn func()) // runs background acquisitions (goroutine; synchronous in tests)
 }
 
 // NewLibrary creates the library service.
 func NewLibrary(store Store) *Library {
-	return &Library{store: store, now: time.Now, publish: func(context.Context, mq.UserEvent) {}, bg: func(fn func()) { go fn() }}
-}
-
-// WithAcquirer makes likes / playlist adds of remote tracks start acquisition.
-func (l *Library) WithAcquirer(a Acquirer, log *slog.Logger) *Library {
-	l.acq, l.log = a, log
-	return l
-}
-
-// WithBackground replaces how background acquisitions run (tests: synchronously).
-func (l *Library) WithBackground(run func(fn func())) *Library {
-	if run != nil {
-		l.bg = run
-	}
-	return l
-}
-
-// acquireAsync starts background acquisition of a remote track (best effort:
-// the like/playlist entry is already stored; the file arrives later).
-func (l *Library) acquireAsync(ctx context.Context, user, track uuid.UUID, reason string) {
-	if l.acq == nil {
-		return
-	}
-	t, err := l.store.TrackForStream(ctx, track)
-	if err != nil || t.NavidromeID != "" || t.ReleaseGroup == uuid.Nil {
-		return
-	}
-	l.bg(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if _, err := l.acq.Acquire(ctx, acq.AcquireRequest{UserID: user, ReleaseGroupMBID: t.ReleaseGroup, RecordingMBID: t.Recording, Title: t.Title, Reason: reason}); err != nil && l.log != nil {
-			l.log.Warn("background acquisition failed", "reason", reason, "err", err)
-		}
-	})
+	return &Library{store: store, now: time.Now, publish: func(context.Context, mq.UserEvent) {}}
 }
 
 // WithEvents publishes likes / playlist changes as user events (reco-service).
@@ -167,7 +130,6 @@ func (l *Library) Like(ctx context.Context, user, track uuid.UUID) error {
 		return err
 	}
 	l.publish(ctx, mq.UserEvent{Kind: mq.KindLike, UserID: user, TrackID: track})
-	l.acquireAsync(ctx, user, track, "like")
 	return nil
 }
 
@@ -251,7 +213,6 @@ func (l *Library) AddToPlaylist(ctx context.Context, user, playlist, track uuid.
 		return err
 	}
 	l.publish(ctx, mq.UserEvent{Kind: mq.KindPlaylistAdd, UserID: user, TrackID: track})
-	l.acquireAsync(ctx, user, track, "playlist")
 	return nil
 }
 
@@ -275,7 +236,6 @@ type Media interface {
 type Streamer struct {
 	store   Store
 	media   Media
-	acq     Acquirer // nil: remote tracks are not playable
 	ytAudio YouTubeAudio
 	caaBase string
 	signer  *signer.Signer
@@ -287,12 +247,6 @@ type Streamer struct {
 // NewStreamer creates the streaming service.
 func NewStreamer(store Store, media Media, s *signer.Signer, ttl time.Duration, log *slog.Logger) *Streamer {
 	return &Streamer{store: store, media: media, signer: s, ttl: ttl, log: log, now: time.Now}
-}
-
-// WithAcquirer enables playback of remote tracks (acquired on first play).
-func (s *Streamer) WithAcquirer(a Acquirer) *Streamer {
-	s.acq = a
-	return s
 }
 
 // YouTubeAudio proxies a YouTube Music track without saving it (ADR 0012).
@@ -307,9 +261,9 @@ func (s *Streamer) WithYouTubeAudio(a YouTubeAudio) *Streamer {
 }
 
 // StreamURL returns a signed URL (TTL ≤ 1 h). ErrStreamingUnavailable when
-// Navidrome is down, so the player can say so instead of failing mid-play.
-// For a remote track it starts/polls the acquisition: *domain.PendingError
-// until enough of the file is buffered, domain.ErrNoSources when it failed.
+// Navidrome or YouTube audio is down, so the player can say so instead of
+// failing mid-play. A row with neither a library file nor a YouTube id is
+// not playable (domain.ErrNoSources).
 func (s *Streamer) StreamURL(ctx context.Context, user, track uuid.UUID) (string, time.Time, error) {
 	t, err := s.store.TrackForStream(ctx, track)
 	if err != nil {
@@ -320,35 +274,12 @@ func (s *Streamer) StreamURL(ctx context.Context, user, track uuid.UUID) (string
 			return "", time.Time{}, domain.ErrStreamingUnavailable
 		}
 	} else if t.NavidromeID == "" {
-		if err := s.acquireForPlay(ctx, user, t); err != nil {
-			return "", time.Time{}, err
-		}
+		return "", time.Time{}, domain.ErrNoSources
 	} else if !s.media.Healthy() {
 		return "", time.Time{}, domain.ErrStreamingUnavailable
 	}
 	exp := s.now().Add(s.ttl).UTC().Truncate(time.Second)
 	return s.signer.StreamURL(track, user, exp), exp, nil
-}
-
-func (s *Streamer) acquireForPlay(ctx context.Context, user uuid.UUID, t repo.StreamTarget) error {
-	if s.acq == nil || t.ReleaseGroup == uuid.Nil {
-		return domain.ErrNoSources
-	}
-	st, err := s.acq.Acquire(ctx, acq.AcquireRequest{UserID: user, ReleaseGroupMBID: t.ReleaseGroup, RecordingMBID: t.Recording, Title: t.Title, Reason: "play"})
-	if err != nil {
-		return acquireErr(err)
-	}
-	switch {
-	case st.State == "failed" || st.ErrorCode == "TRACK_NOT_IN_RELEASE":
-		return domain.ErrNoSources
-	case st.Ready():
-		return nil
-	}
-	retry := 1500
-	if st.State == "downloading" {
-		retry = 800
-	}
-	return &domain.PendingError{Acquisition: domain.Acquisition{State: st.State, Progress: st.Progress, RetryAfter: retry}}
 }
 
 // CoverURL is the signed cover URL for a track list item ("" when none).
@@ -375,20 +306,8 @@ func (s *Streamer) ServeStream(w http.ResponseWriter, r *http.Request, track uui
 		}
 		return nil
 	}
-	if t.NavidromeID == "" { // remote: partial file from the torrent, then the library copy
-		if s.acq == nil || t.Recording == uuid.Nil {
-			return domain.ErrNotFound
-		}
-		resp, err := s.acq.Stream(r.Context(), t.Recording, r.Header, r.Method)
-		if err != nil {
-			if errors.Is(err, acq.ErrNotFound) {
-				return domain.ErrNotFound
-			}
-			return fmt.Errorf("%w: %w", domain.ErrStreamingUnavailable, err)
-		}
-		defer resp.Body.Close()
-		w.Header().Set("Cache-Control", "private, no-store")
-		return s.copy(w, r, resp)
+	if t.NavidromeID == "" {
+		return domain.ErrNotFound
 	}
 	resp, err := s.media.Stream(r.Context(), t.NavidromeID, r.Header)
 	if err != nil {

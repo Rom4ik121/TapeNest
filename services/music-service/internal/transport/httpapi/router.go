@@ -84,9 +84,6 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/internal/v1/catalog", h.exportCatalog)
 			r.Get("/internal/v1/interactions", h.exportInteractions)
 			r.Get("/internal/v1/tracks/{id}/audio", h.audio)
-			if d.Discovery != nil {
-				r.Post("/internal/v1/catalog/refresh", h.catalogRefresh)
-			}
 		}
 		r.Group(func(r chi.Router) {
 			r.Use(requireUser)
@@ -95,12 +92,6 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/api/v1/search", h.searchAll)
 				r.Get("/api/v1/albums/{id}", h.getAlbum)
 				r.Get("/api/v1/artists/{id}", h.getArtist)
-				r.Group(func(r chi.Router) {
-					r.Use(h.requireAdmin)
-					r.Get("/api/v1/admin/acquisitions", h.adminProxy(adminList))
-					r.Get("/api/v1/admin/acquisitions/{id}", h.adminProxy(adminGet))
-					r.Get("/api/v1/admin/acquisition-status", h.adminProxy(adminStatus))
-				})
 			}
 			r.Get("/api/v1/tracks/{kind:recent|popular|liked}", h.list)
 			r.Get("/api/v1/tracks/{id}/stream-url", h.streamURL)
@@ -225,6 +216,8 @@ func (h *handlers) serviceError(w http.ResponseWriter, r *http.Request, op strin
 		writeError(w, http.StatusBadRequest, CodeInvalid, inv.Msg)
 	case errors.Is(err, domain.ErrNotFound):
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found")
+	case errors.Is(err, domain.ErrNoSources):
+		writeError(w, http.StatusNotFound, CodeNoSources, "no sources found for this track")
 	case errors.Is(err, domain.ErrStreamingUnavailable):
 		w.Header().Set(DegradedHeader, "navidrome")
 		w.Header().Set("Retry-After", "15")

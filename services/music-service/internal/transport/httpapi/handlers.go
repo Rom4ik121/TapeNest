@@ -119,9 +119,6 @@ func (h *handlers) streamURL(w http.ResponseWriter, r *http.Request) {
 	}
 	u, exp, err := h.d.Streamer.StreamURL(r.Context(), userFrom(r.Context()), id)
 	if err != nil {
-		if h.acquisitionError(w, err) {
-			return
-		}
 		h.serviceError(w, r, "stream-url", err)
 		return
 	}

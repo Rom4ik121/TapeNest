@@ -12,8 +12,8 @@ type Scanner interface {
 	Scanning(ctx context.Context) (bool, error)
 }
 
-// Refresher runs "rescan now → wait → sync → notify" when acquisition-service
-// reports imported files (ADR 0011), instead of waiting for the periodic sync.
+// Refresher runs "rescan now → wait → sync → notify" when a catalog refresh
+// is requested, instead of waiting for the periodic sync.
 type Refresher struct {
 	Scan     Scanner
 	Sync     func(ctx context.Context) error

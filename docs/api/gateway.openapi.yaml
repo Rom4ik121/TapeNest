@@ -177,7 +177,7 @@ components:
       properties:
         message: { type: string }
         code: { $ref: '#/components/schemas/ErrorCode' }
-        service: { type: string, description: 'upstream name for 501/503: music | download | streaming' }
+        service: { type: string, description: 'upstream name for 501/503: music | download. A passed-through music 503 may set this to streaming when Navidrome audio is down.' }
         fields: { type: object, description: per-field validation errors (400 INVALID) }
     RefreshBody: { type: object, additionalProperties: false, required: [refreshToken], properties: { refreshToken: { type: string, minLength: 16, maxLength: 256 } } }
     User:

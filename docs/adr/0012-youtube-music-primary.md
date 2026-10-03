@@ -1,6 +1,6 @@
 # ADR 0012: YouTube Music is the primary catalog
 
-- Status: Accepted
+- Status: Accepted, amended by [0014](0014-drop-cinema-and-torrent-stack.md) (torrent fallback removed; `MUSIC_SOURCES` default is `youtube`)
 - Date: 2026-10-02
 
 ## Context
@@ -11,15 +11,13 @@ The user asked for the same behavior as an unofficial YouTube Music client: sear
 
 ## Decisions
 
-### 1. YouTube Music first, torrents only as fallback
+### 1. YouTube Music, plus the local library
 
-`MUSIC_SOURCES` defaults to `youtube,torrent`.
+`MUSIC_SOURCES` defaults to `youtube` (ADR 0014 removed the `torrent` value).
 
-- `GET /api/v1/search` still merges the local library.
-- YouTube Music (songs, albums, artists) is queried in parallel.
-- If that returns anything, MusicBrainz and acquisition are not called.
-- If YouTube Music returns nothing or errors, the ADR 0011 torrent path runs, and only if `torrent` is in `MUSIC_SOURCES` and `ACQUISITION_SERVICE_URL` is set.
-- There is still no Add button. A hit is a normal track row. Like and playlist writes happen immediately.
+- `GET /api/v1/search` merges the local Navidrome library with YouTube Music (songs, albums, artists).
+- A hit is a normal track row. Like and playlist writes happen immediately.
+- `MUSIC_SOURCES=library` skips YouTube Music. Nothing calls MusicBrainz or a torrent client.
 
 ### 2. A small client, not a fork
 
@@ -36,4 +34,4 @@ Migration `000004` adds `youtube_video_id` and browse ids. Upserts are idempoten
 - A search for music that is not in the CC0 library can play without Prowlarr indexers.
 - YouTube can block the Android client or expire URLs. The resolver caches a URL until shortly before its `expire` parameter and does not log the URL.
 - Streaming from YouTube is against YouTube's terms of service. That risk sits with the operator. This service does not ship piracy indexers and does not store the audio for redistribution.
-- Setting `MUSIC_SOURCES=torrent` or `MUSIC_SOURCES=library` turns YouTube Music off without a code change.
+- Setting `MUSIC_SOURCES=library` turns YouTube Music off without a code change.

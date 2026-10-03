@@ -4,8 +4,8 @@ COMPOSE ?= $(shell docker compose version >/dev/null 2>&1 && echo "docker compos
 COMPOSE_FILE := deploy/docker-compose.dev.yml
 DC := $(COMPOSE) --env-file $(if $(wildcard .env),.env,.env.example) -f $(COMPOSE_FILE)
 FE := apps/waveplayer
-# every mini app gets lint/typecheck/test/build (FE_APPS=apps/cinenest make fe-test for one)
-FE_APPS ?= apps/waveplayer apps/cinenest
+# every mini app gets lint/typecheck/test/build
+FE_APPS ?= apps/waveplayer
 FE_EACH = @for a in $(FE_APPS); do echo "==> $$a"; (cd $$a && $(1)) || exit 1; done
 GO_MODULES := $(shell find services tools -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 GO_SERVICES := $(shell find services -name go.mod -exec dirname {} \; 2>/dev/null)
@@ -16,7 +16,7 @@ ENV_EXPORT := $(if $(wildcard .env),set -a; . ./.env; set +a;,)
 
 .DEFAULT_GOAL := help
 .PHONY: help dev infra-up infra-up-all infra-down infra-logs infra-ps compose-config app-up \
-        infra-native infra-native-down music-seed e2e-music e2e-reco e2e-acquisition e2e-ytm arr-up arr-down reco-eval fe-install fe-dev cn-dev fe-lint fe-typecheck fe-test fe-build \
+        infra-native infra-native-down music-seed e2e-music e2e-reco e2e-ytm reco-eval fe-install fe-dev fe-lint fe-typecheck fe-test fe-build \
         go-lint go-test go-build sqlc migrate openapi hadolint lint test build proto initdata \
         miniapp-up miniapp-down stack-status clean
 
@@ -26,7 +26,7 @@ help: ## Show targets
 dev: infra-up fe-dev ## Infra in Docker + WavePlayer dev server (mocks on)
 
 # ── infrastructure ─────────────────────────────────────────────────────────
-infra-up: ## Start core infra (postgres, redis, minio, navidrome, torrserver)
+infra-up: ## Start core infra (postgres, redis, minio, navidrome)
 	@mkdir -p data/music
 	$(DC) up -d
 infra-up-all: ## Core infra + observability (prometheus, grafana) + edge (nginx)
@@ -55,8 +55,6 @@ fe-install: ## npm ci for all mini apps
 	$(call FE_EACH,npm ci)
 fe-dev: ## WavePlayer dev server on :5173
 	cd $(FE) && npm run dev
-cn-dev: ## CineNest dev server on :5174 (base /cinenest/, cinema mocks on)
-	cd apps/cinenest && npm run dev
 fe-lint: ## ESLint (0 warnings), all mini apps
 	$(call FE_EACH,npm run lint)
 fe-typecheck: ## tsc --noEmit (strict), all mini apps
@@ -96,7 +94,7 @@ initdata: ## Signed test initData (needs TELEGRAM_BOT_TOKEN in env), ARGS="-form
 	cd tools/initdata-mock && go run . $(ARGS)
 
 # ── dev tunnel (Telegram) ─────────────────────────────────────────────────
-miniapp-up: ## DEV: native infra, music-service + worker, gateway, bot-service (webhook+menu), Vite ×2 (WavePlayer, CineNest), ngrok, url-watch
+miniapp-up: ## DEV: native infra, music-service + worker, gateway, bot-service (webhook+menu), Vite, ngrok, url-watch
 	tools/dev/miniapp-up.sh
 miniapp-down: ## DEV: stop the dev stack (KEEP_NGROK=1 keeps the tunnel URL)
 	tools/dev/miniapp-down.sh
@@ -108,16 +106,8 @@ e2e-music: ## DEV: music API e2e through the public URL (catalog, signed stream 
 e2e-reco: ## DEV: My Wave recommender e2e (reco strategy + reasons, modes, event ingest, breaker fallback when reco stops)
 	@bash tools/dev/e2e-reco.sh
 
-e2e-acquisition: ## DEV: invisible acquisition e2e (unified search, play-before-download via the CC0 test indexer, likes, import, quotas)
-	@bash tools/dev/e2e-acquisition.sh
-
 e2e-ytm: ## DEV: YouTube Music search + stream (no file saved)
 	@bash tools/dev/e2e-ytm.sh
-
-arr-up: ## DEV: Lidarr + Prowlarr + qBittorrent-nox natively (pinned versions, checksum-verified, 127.0.0.1 only)
-	tools/dev/arr-native.sh up
-arr-down: ## DEV: stop Lidarr + Prowlarr + qBittorrent-nox
-	tools/dev/arr-native.sh down
 
 reco-eval: ## Offline evaluation of My Wave (synthetic users; reco vs ADR 0009 heuristic) → docs/reco/evaluation.md
 	@cd services/reco-service && GOTOOLCHAIN=$${GOTOOLCHAIN:-local} go run ./cmd/reco-eval -seeds 5 -out ../../docs/reco/evaluation.md
@@ -125,4 +115,4 @@ stack-status: ## DEV: status of dev stack processes
 	tools/dev/svc.sh status
 
 clean: ## Remove build artefacts
-	rm -rf $(FE)/dist $(FE)/coverage bin
+	rm -rf apps/waveplayer/dist apps/waveplayer/coverage bin
