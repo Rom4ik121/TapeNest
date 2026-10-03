@@ -102,7 +102,8 @@
     "tracks_one": "{{count}} track",
     "tracks_other": "{{count}} tracks",
     "nameLabel": "Folder name",
-    "creating": "Creating…"
+    "creating": "Creating…",
+    "shuffle": "Shuffle"
   },
   "playlist": {
     "empty": "This folder is empty. Add tracks via the “⋯” menu.",
@@ -124,6 +125,8 @@
     "pause": "Pause",
     "next": "Next",
     "prev": "Previous",
+    "repeat": "Repeat one",
+    "repeatOn": "Repeat one on",
     "close": "Collapse player",
     "open": "Open player",
     "tapToPlay": "Tap to continue",

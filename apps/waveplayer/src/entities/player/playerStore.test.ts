@@ -274,8 +274,88 @@ describe('playerStore', () => {
     const { store, engine } = setup();
     store.getState().playQueue([track('x')], 0);
     await flush();
+    engine.emit('pause');
     engine.emit('ended');
     await flush();
     expect(store.getState().status).toBe('paused');
+    expect(store.getState().index).toBe(0);
+  });
+
+  it('a user pause does not advance', async () => {
+    const { store, engine } = setup();
+    store.getState().playQueue(tracks, 1);
+    await flush();
+    engine.tick(12, 100);
+    engine.pause();
+    await flush();
+    expect(store.getState().status).toBe('paused');
+    expect(store.getState().index).toBe(1);
+  });
+
+  it('repeat one restarts the current track and still allows a manual skip', async () => {
+    const { store, engine } = setup();
+    store.getState().playQueue(tracks, 0);
+    await flush();
+    store.getState().toggleRepeat();
+    expect(store.getState().repeatOne).toBe(true);
+    engine.tick(40, 100);
+    // Browsers pause the element before `ended`.
+    engine.emit('pause');
+    engine.emit('ended');
+    await flush();
+    expect(store.getState().index).toBe(0);
+    expect(store.getState().positionSec).toBe(0);
+    expect(engine.loads).toEqual(['blob:a', 'blob:a']);
+    expect(engine.position).toBe(0);
+
+    await store.getState().next();
+    await flush();
+    expect(store.getState().index).toBe(1);
+    expect(store.getState().positionSec).toBe(0);
+
+    store.getState().toggleRepeat();
+    engine.emit('ended');
+    await flush();
+    expect(store.getState().index).toBe(2);
+  });
+
+  it('ends at the catalog length when the element timeline keeps running through silence', async () => {
+    const { store, engine, deps } = setup();
+    store.getState().playQueue([track('a', 120), track('b', 100)], 0);
+    await flush();
+    engine.tick(60, 340);
+    expect(store.getState().durationSec).toBe(120);
+    expect(store.getState().positionSec).toBe(60);
+    expect(deps.reportListened).toHaveBeenCalledWith('a', 60, false);
+
+    engine.tick(120, 340);
+    await flush();
+    expect(store.getState().index).toBe(1);
+    expect(store.getState().positionSec).toBe(0);
+    expect(engine.src).toBe('blob:b');
+    expect(deps.reportListened).toHaveBeenLastCalledWith('a', 120, true);
+  });
+
+  it('warms the next track while the current one plays and aborts that warm on a skip', async () => {
+    const calls: Array<{ id: string; signal: AbortSignal }> = [];
+    const warm = vi.fn(async (id: string, signal: AbortSignal) => {
+      calls.push({ id, signal });
+    });
+    const { store } = setup({ warm });
+    store.getState().playQueue(tracks, 0);
+    await flush();
+    expect(calls.map((c) => c.id)).toEqual(['b']);
+
+    await store.getState().next();
+    await flush();
+    expect(calls[0]?.signal.aborted).toBe(true);
+    expect(calls.map((c) => c.id)).toEqual(['b', 'c']);
+
+    await store.getState().next();
+    await flush();
+    expect(calls[1]?.signal.aborted).toBe(true);
+    expect(calls.map((c) => c.id)).toEqual(['b', 'c']);
+    expect(store.getState().index).toBe(2);
+    expect(store.getState().positionSec).toBe(0);
   });
 });

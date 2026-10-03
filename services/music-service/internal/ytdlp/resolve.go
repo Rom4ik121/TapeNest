@@ -26,8 +26,9 @@ type Resolver struct {
 	Bin  string
 	HTTP *http.Client
 
-	mu    sync.Mutex
-	cache map[string]cached
+	mu     sync.Mutex
+	cache  map[string]cached
+	flying map[string]*resolveCall
 }
 
 type cached struct {
@@ -35,12 +36,25 @@ type cached struct {
 	exp time.Time
 }
 
+// resolveCall is one in-flight yt-dlp. Prefetch and playback share it, and a
+// cancelled prefetch does not cancel the lookup the player is about to need.
+type resolveCall struct {
+	done chan struct{}
+	url  string
+	err  error
+}
+
 // New builds a resolver. bin defaults to "yt-dlp" on PATH.
 func New(bin string) *Resolver {
 	if strings.TrimSpace(bin) == "" {
 		bin = "yt-dlp"
 	}
-	return &Resolver{Bin: bin, HTTP: &http.Client{Timeout: 0, CheckRedirect: checkRedirect}, cache: map[string]cached{}}
+	return &Resolver{
+		Bin:    bin,
+		HTTP:   &http.Client{Timeout: 0, CheckRedirect: checkRedirect},
+		cache:  map[string]cached{},
+		flying: map[string]*resolveCall{},
+	}
 }
 
 func checkRedirect(req *http.Request, _ []*http.Request) error {
@@ -56,16 +70,53 @@ func allowedStreamHost(h string) bool {
 }
 
 // Resolve returns a googlevideo URL for videoID. The URL is cached until
-// shortly before its expire parameter.
+// shortly before its expire parameter. Concurrent calls share one yt-dlp run.
 func (r *Resolver) Resolve(ctx context.Context, videoID string) (string, error) {
 	if !ytm.ValidVideoID(videoID) {
 		return "", errors.New("invalid video id")
 	}
-	if u, ok := r.cached(videoID); ok {
+	r.mu.Lock()
+	if c, ok := r.cache[videoID]; ok && time.Now().Before(c.exp) {
+		u := c.url
+		r.mu.Unlock()
 		return u, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	if f, ok := r.flying[videoID]; ok {
+		r.mu.Unlock()
+		return waitResolve(ctx, f)
+	}
+	f := &resolveCall{done: make(chan struct{})}
+	r.flying[videoID] = f
+	r.mu.Unlock()
+	go r.fulfill(f, videoID)
+	return waitResolve(ctx, f)
+}
+
+func waitResolve(ctx context.Context, f *resolveCall) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-f.done:
+		return f.url, f.err
+	}
+}
+
+func (r *Resolver) fulfill(f *resolveCall, videoID string) {
+	defer func() {
+		close(f.done)
+		r.mu.Lock()
+		if r.flying[videoID] == f {
+			delete(r.flying, videoID)
+		}
+		r.mu.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
+	u, err := r.resolveOnce(ctx, videoID)
+	f.url, f.err = u, err
+}
+
+func (r *Resolver) resolveOnce(ctx context.Context, videoID string) (string, error) {
 	// #nosec G204 -- videoID is 11 url-safe chars; arguments are fixed.
 	cmd := exec.CommandContext(ctx, r.Bin, //nolint:gosec // validated id, fixed args
 		"--no-warnings", "--no-playlist", "--no-progress",
@@ -89,16 +140,6 @@ func (r *Resolver) Resolve(ctx context.Context, videoID string) (string, error) 
 	}
 	r.store(videoID, u)
 	return u.String(), nil
-}
-
-func (r *Resolver) cached(id string) (string, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.cache[id]
-	if !ok || time.Now().After(c.exp) {
-		return "", false
-	}
-	return c.url, true
 }
 
 func (r *Resolver) store(id string, u *url.URL) {

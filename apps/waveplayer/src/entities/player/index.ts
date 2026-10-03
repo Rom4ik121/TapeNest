@@ -9,6 +9,7 @@ import { showToast } from '@/shared/ui/toastStore';
 import { HtmlAudioEngine } from './audioEngine';
 import { createPlayerStore, type PlayerStore } from './playerStore';
 import { loadSession, saveSession } from './session';
+import { warmStream } from './warmStream';
 
 /** Flip `liked` for a track in every cached list so the UI stays consistent. */
 function patchLikedInCache(trackId: string, liked: boolean): void {
@@ -67,6 +68,7 @@ export const playerStore = createPlayerStore({
   },
   persistSession: saveSession,
   haptic: (k) => haptic(k),
+  warm: warmStream,
 });
 
 export function usePlayer<T>(selector: (s: PlayerStore) => T): T {

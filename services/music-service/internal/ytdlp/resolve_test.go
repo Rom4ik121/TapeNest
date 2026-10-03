@@ -65,6 +65,43 @@ func TestResolveAndProxy(t *testing.T) {
 	}
 }
 
+func TestResolveSingleflight(t *testing.T) {
+	dir := t.TempDir()
+	count := filepath.Join(dir, "count")
+	script := filepath.Join(dir, "yt-dlp")
+	body := "#!/bin/sh\nprintf 'x\\n' >> '" + count + "'\nsleep 0.3\n" +
+		"printf '%s\\n' 'https://rr1.googlevideo.com/videoplayback?expire=9999999999'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := New(script)
+	const id = "abcdefghijk"
+	type result struct {
+		u   string
+		err error
+	}
+	ch := make(chan result, 2)
+	go func() {
+		u, err := r.Resolve(context.Background(), id)
+		ch <- result{u, err}
+	}()
+	go func() {
+		u, err := r.Resolve(context.Background(), id)
+		ch <- result{u, err}
+	}()
+	a, b := <-ch, <-ch
+	if a.err != nil || b.err != nil || a.u != b.u || !strings.Contains(a.u, "googlevideo.com") {
+		t.Fatalf("%q %v / %q %v", a.u, a.err, b.u, b.err)
+	}
+	n, err := os.ReadFile(count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(n)) != "x" {
+		t.Fatalf("yt-dlp ran more than once: %q", string(n))
+	}
+}
+
 func TestProxyAllowListed(t *testing.T) {
 	var gotRange string
 	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
