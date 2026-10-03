@@ -11,6 +11,7 @@ import (
 
 	"github.com/tapenest/tapenest/services/download-service/internal/cookies"
 	"github.com/tapenest/tapenest/services/download-service/internal/domain"
+	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 	"github.com/tapenest/tapenest/services/download-service/internal/mq"
 	"github.com/tapenest/tapenest/services/download-service/internal/repo"
 	"github.com/tapenest/tapenest/services/download-service/internal/ytdlp"
@@ -38,10 +39,11 @@ type Store interface {
 	SetPosterKey(ctx context.Context, mediaID uuid.UUID, key string) error
 }
 
-// Editor trims and grabs a frame with the ffmpeg already used by yt-dlp.
+// Editor trims, grabs a frame, and renders a timeline with the ffmpeg already used by yt-dlp.
 type Editor interface {
 	Poster(ctx context.Context, src, dst string) error
 	Trim(ctx context.Context, src, dst string, start, end time.Duration) error
+	Compose(ctx context.Context, spec ffmpeg.ComposeSpec, dst string) error
 }
 
 // Queue schedules jobs (mq.Queue).

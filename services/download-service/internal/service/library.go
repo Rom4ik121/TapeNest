@@ -18,8 +18,8 @@ import (
 	"github.com/tapenest/tapenest/services/download-service/internal/domain"
 )
 
-// cleanTitle normalizes an owner-supplied name (1..120 runes, no control chars).
-func cleanTitle(raw string) (string, error) {
+// squashText collapses whitespace and drops control characters.
+func squashText(raw string) string {
 	s := strings.Map(func(r rune) rune {
 		switch r {
 		case '\n', '\r', '\t':
@@ -30,7 +30,12 @@ func cleanTitle(raw string) (string, error) {
 		}
 		return r
 	}, raw)
-	s = strings.Join(strings.Fields(s), " ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// cleanTitle normalizes an owner-supplied name (1..120 runes, no control chars).
+func cleanTitle(raw string) (string, error) {
+	s := squashText(raw)
 	if n := len([]rune(s)); n < 1 || n > 120 {
 		return "", ErrBadTitle
 	}
@@ -149,38 +154,61 @@ func (a *API) Trim(ctx context.Context, userID, id uuid.UUID, startSec, endSec f
 		a.log.WarnContext(ctx, "trim failed", "err", err)
 		return View{}, ErrEditFailed
 	}
-	st, err := os.Stat(out)
-	if err != nil || st.Size() == 0 {
-		return View{}, ErrEditFailed
-	}
-	mediaID := uuid.New()
-	key := fmt.Sprintf("edits/%s/%s.mp4", a.now().UTC().Format("2006/01"), mediaID)
-	f, err := os.Open(out) //nolint:gosec // path is inside our temp dir
-	if err != nil {
-		return View{}, err
-	}
-	size, err := a.files.Put(ctx, key, f, st.Size(), "video/mp4", FileName(j.VisibleTitle(), m.ExternalID, "video/mp4"))
-	_ = f.Close()
-	if err != nil {
-		return View{}, err
-	}
-	posterKey := a.storePoster(ctx, dir, out, mediaID)
 	title := j.VisibleTitle()
 	if title == "" {
 		title = m.Title
-	}
-	expires := m.ExpiresAt
-	if !expires.After(a.now()) {
-		expires = a.now().Add(24 * time.Hour)
 	}
 	dur := int(math.Round(end.Seconds() - start.Seconds()))
 	if dur < 1 {
 		dur = 1
 	}
+	return a.persistRendered(ctx, userID, renderedFile{
+		localPath: out, title: title, duration: dur, formatID: "trim",
+		width: m.Width, height: m.Height, sourceJob: j, sourceMedia: m,
+	})
+}
+
+// renderedFile is a local mp4 that becomes a new library row owned by one user.
+type renderedFile struct {
+	localPath   string
+	title       string
+	duration    int
+	formatID    string
+	width       int
+	height      int
+	sourceJob   domain.Job
+	sourceMedia domain.Media
+}
+
+func (a *API) persistRendered(ctx context.Context, userID uuid.UUID, r renderedFile) (View, error) {
+	st, err := os.Stat(r.localPath)
+	if err != nil || st.Size() == 0 {
+		return View{}, ErrEditFailed
+	}
+	mediaID := uuid.New()
+	key := fmt.Sprintf("edits/%s/%s.mp4", a.now().UTC().Format("2006/01"), mediaID)
+	f, err := os.Open(r.localPath) //nolint:gosec // path is inside our temp dir
+	if err != nil {
+		return View{}, err
+	}
+	size, err := a.files.Put(ctx, key, f, st.Size(), "video/mp4", FileName(r.title, r.sourceMedia.ExternalID, "video/mp4"))
+	_ = f.Close()
+	if err != nil {
+		return View{}, err
+	}
+	posterKey := a.storePoster(ctx, filepath.Dir(r.localPath), r.localPath, mediaID)
+	expires := r.sourceMedia.ExpiresAt
+	if !expires.After(a.now()) {
+		expires = a.now().Add(24 * time.Hour)
+	}
+	dur := r.duration
+	if dur < 1 {
+		dur = 1
+	}
 	stored, err := a.store.UpsertMedia(ctx, domain.Media{
-		ID: mediaID, URLHash: editHash(mediaID), URL: "edit:" + mediaID.String(), Source: m.Source,
-		ExternalID: m.ExternalID, Title: title, DurationSec: dur, Width: m.Width, Height: m.Height,
-		FormatID: "trim", ObjectKey: key, SizeBytes: size, MimeType: "video/mp4", PosterKey: posterKey,
+		ID: mediaID, URLHash: editHash(mediaID), URL: "edit:" + mediaID.String(), Source: r.sourceMedia.Source,
+		ExternalID: r.sourceMedia.ExternalID, Title: r.title, DurationSec: dur, Width: r.width, Height: r.height,
+		FormatID: r.formatID, ObjectKey: key, SizeBytes: size, MimeType: "video/mp4", PosterKey: posterKey,
 		ExpiresAt: expires,
 	})
 	if err != nil {
@@ -189,8 +217,8 @@ func (a *API) Trim(ctx context.Context, userID, id uuid.UUID, startSec, endSec f
 	}
 	now := a.now()
 	created := domain.Job{
-		ID: uuid.New(), UserID: userID, URL: j.URL, Normalized: stored.URL, URLHash: stored.URLHash,
-		Source: j.Source, Status: domain.StatusDone, Title: title, MediaID: &stored.ID, FinishedAt: &now,
+		ID: uuid.New(), UserID: userID, URL: r.sourceJob.URL, Normalized: stored.URL, URLHash: stored.URLHash,
+		Source: r.sourceJob.Source, Status: domain.StatusDone, Title: r.title, MediaID: &stored.ID, FinishedAt: &now,
 	}
 	created, err = a.store.InsertJob(ctx, created)
 	if err != nil {

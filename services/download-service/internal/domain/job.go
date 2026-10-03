@@ -105,7 +105,7 @@ type Media struct {
 	ExpiresAt   time.Time
 }
 
-// OwnedEdit reports a file produced by trim (not a shared source download).
+// OwnedEdit reports a file produced by trim or a timeline export (not a shared source download).
 func (m Media) OwnedEdit() bool {
 	return strings.HasPrefix(m.URL, "edit:")
 }

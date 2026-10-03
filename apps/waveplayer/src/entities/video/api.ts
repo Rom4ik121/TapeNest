@@ -1,5 +1,5 @@
 import { api, ApiError } from '@/shared/api/client';
-import type { FileLink, VideoJob, VideoPage } from './types';
+import type { ComposeRequest, FileLink, VideoJob, VideoPage } from './types';
 
 export const downloadsApi = {
   list: (cursor: string | null, signal?: AbortSignal) =>
@@ -14,6 +14,7 @@ export const downloadsApi = {
       method: 'POST',
       body: { startSec, endSec },
     }),
+  compose: (body: ComposeRequest) => api<VideoJob>('/downloads/compose', { method: 'POST', body }),
   fileUrl: (id: string, signal?: AbortSignal) =>
     api<FileLink>(`/downloads/${encodeURIComponent(id)}/file`, { query: { redirect: 'false' }, signal }),
 };
@@ -35,9 +36,11 @@ export function downloadErrorKey(error: unknown): string {
     case 'QUOTA_DAILY':
       return 'videos.errors.quotaDaily';
     case 'EDIT_FAILED':
-      return 'videos.errors.trim';
+      return 'videos.errors.export';
     case 'EDIT_UNAVAILABLE':
-      return 'videos.errors.trimOff';
+      return 'videos.errors.exportOff';
+    case 'TIMELINE_INVALID':
+      return 'videos.errors.timeline';
     case 'NOT_READY':
       return 'videos.errors.notReady';
     default:

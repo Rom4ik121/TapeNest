@@ -28,6 +28,7 @@ describe('video clocks', () => {
     expect(downloadErrorKey(new ApiError(400, 'x', 'UNSUPPORTED_SOURCE'))).toBe('videos.errors.unsupported');
     expect(downloadErrorKey(new ApiError(400, 'x', 'PLAYLIST_NOT_SUPPORTED'))).toBe('videos.errors.playlist');
     expect(downloadErrorKey(new ApiError(429, 'x', 'QUOTA_DAILY'))).toBe('videos.errors.quotaDaily');
-    expect(downloadErrorKey(new ApiError(422, 'x', 'EDIT_FAILED'))).toBe('videos.errors.trim');
+    expect(downloadErrorKey(new ApiError(422, 'x', 'EDIT_FAILED'))).toBe('videos.errors.export');
+    expect(downloadErrorKey(new ApiError(400, 'x', 'TIMELINE_INVALID'))).toBe('videos.errors.timeline');
   });
 });

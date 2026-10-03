@@ -28,7 +28,7 @@ import (
 func editorOrNil(log *slog.Logger, loc string) service.Editor {
 	ff, err := ffmpeg.New(loc)
 	if err != nil {
-		log.Warn("ffmpeg unavailable, trim and frame posters are off", "err", err)
+		log.Warn("ffmpeg unavailable, trim, export and frame posters are off", "err", err)
 		return nil
 	}
 	return ff

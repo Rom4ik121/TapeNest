@@ -20,6 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tapenest/tapenest/services/download-service/internal/domain"
+	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 	"github.com/tapenest/tapenest/services/download-service/internal/mq"
 	"github.com/tapenest/tapenest/services/download-service/internal/repo"
 	"github.com/tapenest/tapenest/services/download-service/internal/service"
@@ -327,6 +328,21 @@ func (bytesEditor) Trim(_ context.Context, src, dst string, _, _ time.Duration) 
 	return os.WriteFile(dst, b, 0o600)
 }
 
+func (bytesEditor) Compose(_ context.Context, spec ffmpeg.ComposeSpec, dst string) error {
+	var b []byte
+	for _, clip := range spec.Clips {
+		raw, err := os.ReadFile(clip.Path)
+		if err != nil {
+			return err
+		}
+		b = append(b, raw...)
+	}
+	if len(b) == 0 {
+		b = []byte("edit")
+	}
+	return os.WriteFile(dst, b, 0o600)
+}
+
 func TestLibraryHTTP(t *testing.T) {
 	f := setup(t)
 	mediaID := uuid.New()
@@ -370,6 +386,15 @@ func TestLibraryHTTP(t *testing.T) {
 	if r.StatusCode != 200 || len(items) != 2 {
 		t.Fatalf("list: %d %+v", r.StatusCode, b)
 	}
+	composeBody := `{"title":"Монтаж","clips":[{"jobId":"` + jobID.String() + `","inSec":0,"outSec":4,"speed":1,"volume":1,"crop":{"x":0,"y":0,"w":1,"h":1},"rotate":0,"transition":"none","transitionSec":0},{"jobId":"` + jobID.String() + `","inSec":1,"outSec":5,"speed":2,"volume":0.5,"crop":{"x":0.1,"y":0.1,"w":0.8,"h":0.8},"rotate":90,"transition":"fade","transitionSec":0.4}],"texts":[{"text":"Привет","startSec":0.2,"endSec":1.2,"x":0.5,"y":0.2}],"music":{"jobId":"` + jobID.String() + `","inSec":0,"volume":0.4,"offsetSec":0.2}}`
+	r, b = f.do(t, "POST", "/api/v1/downloads/compose", composeBody, nil)
+	if r.StatusCode != 201 || b["title"] != "Монтаж" || b["status"] != "done" || b["id"] == jobID.String() {
+		t.Fatalf("compose: %d %+v", r.StatusCode, b)
+	}
+	badSpeed := `{"title":"Монтаж","clips":[{"jobId":"` + jobID.String() + `","inSec":0,"outSec":4,"speed":9,"volume":1,"crop":{"x":0,"y":0,"w":1,"h":1},"rotate":0,"transition":"none","transitionSec":0}]}`
+	if r, b := f.do(t, "POST", "/api/v1/downloads/compose", badSpeed, nil); r.StatusCode != 400 || b["code"] != CodeTimeline {
+		t.Fatalf("bad timeline: %d %+v", r.StatusCode, b)
+	}
 	r, _ = f.do(t, "DELETE", path, "", nil)
 	if r.StatusCode != 204 {
 		t.Fatal(r.StatusCode)
@@ -386,5 +411,10 @@ func TestLibraryHTTP(t *testing.T) {
 	}
 	if r, _ := f.do(t, "DELETE", "/api/v1/downloads/"+cutID, "", nil); r.StatusCode != 204 {
 		t.Fatal(r.StatusCode)
+	}
+
+	gone := `{"title":"Монтаж","clips":[{"jobId":"` + jobID.String() + `","inSec":0,"outSec":4,"speed":1,"volume":1,"crop":{"x":0,"y":0,"w":1,"h":1},"rotate":0,"transition":"none","transitionSec":0}]}`
+	if r, b := f.do(t, "POST", "/api/v1/downloads/compose", gone, nil); r.StatusCode != 404 {
+		t.Fatalf("deleted source: %d %+v", r.StatusCode, b)
 	}
 }

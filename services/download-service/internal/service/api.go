@@ -27,6 +27,7 @@ var (
 	ErrNotFound        = repo.ErrNotFound
 	ErrBadTitle        = errors.New("bad title")
 	ErrBadRange        = errors.New("bad trim range")
+	ErrBadProject      = errors.New("bad timeline")
 	ErrEditFailed      = errors.New("edit failed")
 	ErrEditUnavailable = errors.New("edit unavailable")
 )

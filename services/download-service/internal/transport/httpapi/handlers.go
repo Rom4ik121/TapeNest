@@ -107,6 +107,8 @@ func (h *handlers) serviceError(w http.ResponseWriter, r *http.Request, op strin
 		writeError(w, http.StatusBadRequest, CodeInvalid, "title must be 1–120 characters")
 	case errors.Is(err, service.ErrBadRange):
 		writeError(w, http.StatusBadRequest, CodeInvalid, "trim needs a start and an end at least 1 second apart, inside the video")
+	case errors.Is(err, service.ErrBadProject):
+		writeError(w, http.StatusBadRequest, CodeTimeline, "the timeline is not valid")
 	case errors.Is(err, service.ErrEditFailed):
 		writeError(w, http.StatusUnprocessableEntity, CodeEditFailed, "could not trim this video")
 	case errors.Is(err, service.ErrEditUnavailable):
@@ -356,6 +358,22 @@ func (h *handlers) trim(w http.ResponseWriter, r *http.Request) {
 	v, err := h.d.API.Trim(r.Context(), userFrom(r.Context()), id, req.StartSec, req.EndSec)
 	if err != nil {
 		h.serviceError(w, r, "trim", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toDTO(v))
+}
+
+func (h *handlers) compose(w http.ResponseWriter, r *http.Request) {
+	var req service.Project
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, CodeInvalid, "invalid JSON body")
+		return
+	}
+	v, err := h.d.API.Compose(r.Context(), userFrom(r.Context()), req)
+	if err != nil {
+		h.serviceError(w, r, "compose", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toDTO(v))

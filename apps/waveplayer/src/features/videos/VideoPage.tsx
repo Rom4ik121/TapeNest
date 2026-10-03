@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { downloadErrorKey } from '@/entities/video/api';
 import { useDeleteVideo, useRenameVideo, useTrimVideo, useVideo, useVideoFile } from '@/entities/video/queries';
 import { formatWhen, trimRange } from '@/entities/video/range';
@@ -98,6 +98,12 @@ export function VideoPage() {
 
       {job.status === 'done' && (
         <div className="mt-5 space-y-5">
+          <Link
+            to={`/videos/${job.id}/edit`}
+            className="flex h-12 items-center justify-center rounded-2xl bg-plum text-sm font-semibold text-cream"
+          >
+            {t('videos.editor.open')}
+          </Link>
           <form
             className="space-y-2"
             onSubmit={(event) => {

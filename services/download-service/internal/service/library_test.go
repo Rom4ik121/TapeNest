@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tapenest/tapenest/services/download-service/internal/domain"
+	"github.com/tapenest/tapenest/services/download-service/internal/ffmpeg"
 )
 
 func TestTrimWindow(t *testing.T) {
@@ -49,6 +50,21 @@ func (e copyEditor) Trim(_ context.Context, src, dst string, _, _ time.Duration)
 		return err
 	}
 	return os.WriteFile(dst, append([]byte("cut:"), b...), 0o600)
+}
+
+func (e copyEditor) Compose(_ context.Context, spec ffmpeg.ComposeSpec, dst string) error {
+	if e.fail != nil {
+		return e.fail
+	}
+	var b []byte
+	for _, clip := range spec.Clips {
+		raw, err := os.ReadFile(clip.Path)
+		if err != nil {
+			return err
+		}
+		b = append(b, raw...)
+	}
+	return os.WriteFile(dst, append([]byte("edit:"), b...), 0o600)
 }
 
 func TestLibraryRenameDeleteTrim(t *testing.T) {

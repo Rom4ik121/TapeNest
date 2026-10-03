@@ -6,6 +6,7 @@ import { useAuthStore, type AuthErrorKind } from '@/entities/auth/authStore';
 import { ensureSession } from '@/entities/auth/session';
 import { startPlayerLifecycle } from '@/entities/player';
 import { HomePage } from '@/features/home/HomePage';
+import { EditorPage } from '@/features/videos/editor/EditorPage';
 import { VideoLibraryPage } from '@/features/videos/LibraryPage';
 import { VideoPage } from '@/features/videos/VideoPage';
 import { LibraryPage } from '@/features/library/LibraryPage';
@@ -111,6 +112,7 @@ function Layout() {
             <Route path="/album/:albumId" element={<AlbumPage />} />
             <Route path="/artist/:artistId" element={<ArtistPage />} />
             <Route path="/videos" element={<VideoLibraryPage />} />
+            <Route path="/videos/:id/edit" element={<EditorPage />} />
             <Route path="/videos/:id" element={<VideoPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

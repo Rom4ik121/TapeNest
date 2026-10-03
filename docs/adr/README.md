@@ -18,3 +18,4 @@ Only decisions **not** fixed in `AI_DEVELOPMENT_INSTRUCTION.md` §3.1 (spec §13
 | [0012](0012-youtube-music-primary.md) | YouTube Music is the primary catalog; torrents are the fallback | Accepted |
 | [0013](0013-cinenest-streaming-service.md) | CineNest streaming-service: fictional catalog, generated HLS preview, TorrServer only when a magnet is already stored | Accepted, not offered in the bot (0014) |
 | [0014](0014-videos-instead-of-cinema.md) | No cinema in the bot; video is a pasted link; the owner's library can rename, delete and trim | Accepted |
+| [0015](0015-timeline-editor.md) | Timeline editor over the owner's downloads: split, trim, reorder, speed, crop, rotate, volume, text, music, transitions, ffmpeg export | Accepted |

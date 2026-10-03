@@ -113,6 +113,7 @@ describe('video library', () => {
     renderPlayer();
 
     expect(await screen.findByRole('heading', { name: 'Домашний клип' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Открыть редактор' })).toHaveAttribute('href', '/videos/job-1/edit');
     const video = document.querySelector('video');
     expect(video).toHaveAttribute('src', 'https://cdn.example/clip.mp4');
 

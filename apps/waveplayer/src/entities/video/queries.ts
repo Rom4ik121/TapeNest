@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { qk } from '@/shared/api/queryClient';
 import { downloadsApi } from './api';
+import type { ComposeRequest } from './types';
 
 export function useVideoList() {
   return useQuery({
@@ -57,6 +58,14 @@ export function useDeleteVideo() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => downloadsApi.remove(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.videos.list }),
+  });
+}
+
+export function useComposeVideo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ComposeRequest) => downloadsApi.compose(body),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.videos.list }),
   });
 }
