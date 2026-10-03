@@ -1,6 +1,6 @@
 # download-service
 
-Stage 2: downloads public videos from **YouTube, VK Video and RuTube** with yt-dlp (+ ffmpeg for
+Stage 2: downloads a public video the user pasted (YouTube, VK, RuTube, TikTok, Vimeo and other hosts yt-dlp already supports) with yt-dlp (+ ffmpeg for
 muxing, deno as yt-dlp's JS runtime), stores them in MinIO and delivers them to the mini-app (SSE +
 presigned links) and to the bot (Redis stream `download:events`). The same rows are the owner's
 library: rename (`PATCH`), hide (`DELETE`), trim (`POST …/trim`) and a timeline export

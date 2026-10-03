@@ -82,7 +82,13 @@ type Notifier struct {
 	Log         *slog.Logger
 }
 
-var sourceNames = map[string]string{"youtube": "YouTube", "vk": "VK", "rutube": "RuTube"}
+var sourceNames = map[string]string{
+	"youtube": "YouTube", "vk": "VK", "rutube": "RuTube", "tiktok": "TikTok", "vimeo": "Vimeo",
+	"dailymotion": "Dailymotion", "instagram": "Instagram", "twitter": "X", "twitch": "Twitch",
+	"facebook": "Facebook", "ok": "OK", "coub": "Coub", "reddit": "Reddit", "streamable": "Streamable",
+	"rumble": "Rumble", "kick": "Kick", "bilibili": "Bilibili", "mailru": "Mail.ru", "niconico": "Niconico",
+	"telegram": "Telegram",
+}
 
 func (n *Notifier) t(e Event, key string, args ...string) string {
 	return n.Texts.T(i18n.Detect(e.Lang), key, args...)

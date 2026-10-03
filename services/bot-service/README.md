@@ -17,7 +17,7 @@ client).
   - `/start` sends a greeting and an inline `web_app` button to the WavePlayer mini app;
   - `/help` sends a help text;
   - an unknown command gets a hint.
-- Links to supported sources (YouTube, VK Video, RuTube) are detected from message entities
+- Links to supported public video hosts (YouTube, VK, RuTube, TikTok, Vimeo and others yt-dlp already extracts) are detected from message entities
   (UTF-16 offsets) with a regex fallback. They are forwarded to the gateway via
   `POST /internal/v1/bot/downloads`.
   - Download flow (stage 2, ADR 0008):

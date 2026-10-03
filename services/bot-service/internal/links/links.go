@@ -14,20 +14,59 @@ import (
 // Source is a supported video platform.
 type Source string
 
-// Supported sources (spec §5.3 lists per-domain limits for these).
+// Supported sources. YouTube, VK and RuTube are the original set; the rest are
+// public video hosts yt-dlp already extracts. Torrent indexes and cinema
+// catalogs are not sources — a download starts only from a pasted link.
 const (
-	YouTube Source = "YouTube"
-	VK      Source = "VK"
-	RuTube  Source = "RuTube"
+	YouTube     Source = "YouTube"
+	VK          Source = "VK"
+	RuTube      Source = "RuTube"
+	TikTok      Source = "TikTok"
+	Vimeo       Source = "Vimeo"
+	Dailymotion Source = "Dailymotion"
+	Instagram   Source = "Instagram"
+	X           Source = "X"
+	Twitch      Source = "Twitch"
+	Facebook    Source = "Facebook"
+	OK          Source = "OK"
+	Coub        Source = "Coub"
+	Reddit      Source = "Reddit"
+	Streamable  Source = "Streamable"
+	Rumble      Source = "Rumble"
+	Kick        Source = "Kick"
+	Bilibili    Source = "Bilibili"
+	Mailru      Source = "Mail.ru"
+	Niconico    Source = "Niconico"
+	Telegram    Source = "Telegram"
 )
 
 // Sources is the ordered list shown to users.
-var Sources = []Source{YouTube, VK, RuTube}
+var Sources = []Source{
+	YouTube, VK, RuTube, TikTok, Vimeo, Dailymotion, Instagram, X, Twitch, Facebook,
+	OK, Coub, Reddit, Streamable, Rumble, Kick, Bilibili, Mailru, Niconico, Telegram,
+}
 
 var hostSources = map[string]Source{
 	"youtube.com": YouTube, "youtu.be": YouTube, "youtube-nocookie.com": YouTube,
 	"vk.com": VK, "vk.ru": VK, "vkvideo.ru": VK,
-	"rutube.ru": RuTube,
+	"rutube.ru":       RuTube,
+	"tiktok.com":      TikTok,
+	"vimeo.com":       Vimeo,
+	"dailymotion.com": Dailymotion, "dai.ly": Dailymotion,
+	"instagram.com": Instagram,
+	"twitter.com":   X, "x.com": X,
+	"twitch.tv":    Twitch,
+	"facebook.com": Facebook, "fb.watch": Facebook, "fb.com": Facebook,
+	"ok.ru": OK, "odnoklassniki.ru": OK,
+	"coub.com":   Coub,
+	"reddit.com": Reddit, "redd.it": Reddit,
+	"streamable.com": Streamable,
+	"rumble.com":     Rumble,
+	"kick.com":       Kick,
+	"bilibili.com":   Bilibili, "b23.tv": Bilibili,
+	"mail.ru":      Mailru,
+	"nicovideo.jp": Niconico, "nico.ms": Niconico,
+	"t.me": Telegram, "telegram.me": Telegram,
 }
 
 // Link is a detected URL.

@@ -40,6 +40,7 @@ type Opts struct {
 	CookiesFile string
 	UserAgent   string
 	MaxFilesize int64
+	Metadata    bool // probe: short socket timeout, no yt-dlp retries
 }
 
 // Runner executes the yt-dlp binary.
@@ -50,7 +51,13 @@ type Runner struct {
 }
 
 func (r *Runner) base(o Opts) []string {
-	args := []string{"--ignore-config", "--no-playlist", "--no-color", "--socket-timeout", "30", "--retries", "3", "--fragment-retries", "3"}
+	socket, retries := "30", "3"
+	if o.Metadata {
+		// The chat is sitting on «проверяю». Metadata must return before the
+		// long download timeouts; a bot wall or a dead source shows up in seconds.
+		socket, retries = "8", "0"
+	}
+	args := []string{"--ignore-config", "--no-playlist", "--no-color", "--socket-timeout", socket, "--retries", retries, "--fragment-retries", retries}
 	if r.JSRuntimes != "" {
 		args = append(args, "--js-runtimes", r.JSRuntimes)
 	}
@@ -84,6 +91,7 @@ func (r *Runner) command(ctx context.Context, args []string) *exec.Cmd {
 
 // Probe is pass 1: metadata only. The raw JSON is written to infoPath for pass 2.
 func (r *Runner) Probe(ctx context.Context, url string, o Opts, infoPath string) (domain.Info, error) {
+	o.Metadata = true
 	args := append(r.base(o), "--skip-download", "--dump-single-json", "--", url)
 	cmd := r.command(ctx, args)
 	var stdout, stderr bytes.Buffer

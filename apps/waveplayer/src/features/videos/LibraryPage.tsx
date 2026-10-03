@@ -5,15 +5,49 @@ import { Link } from 'react-router-dom';
 import { downloadErrorKey } from '@/entities/video/api';
 import { useCreateDownload, useVideoList } from '@/entities/video/queries';
 import { formatWhen } from '@/entities/video/range';
-import type { VideoJob, VideoSource } from '@/entities/video/types';
+import type { VideoJob } from '@/entities/video/types';
 import { formatTime, gradientFor } from '@/shared/lib/format';
 import { haptic } from '@/shared/telegram';
 import { EmptyState, ErrorState } from '@/shared/ui/States';
 
-const SOURCES: readonly VideoSource[] = ['youtube', 'vk', 'rutube'];
+const SOURCE_LABEL: Record<string, string> = {
+  youtube: 'YouTube',
+  vk: 'VK',
+  rutube: 'RuTube',
+  tiktok: 'TikTok',
+  vimeo: 'Vimeo',
+  dailymotion: 'Dailymotion',
+  instagram: 'Instagram',
+  twitter: 'X',
+  twitch: 'Twitch',
+  facebook: 'Facebook',
+  ok: 'OK',
+  coub: 'Coub',
+  reddit: 'Reddit',
+  streamable: 'Streamable',
+  rumble: 'Rumble',
+  kick: 'Kick',
+  bilibili: 'Bilibili',
+  mailru: 'Mail.ru',
+  niconico: 'Niconico',
+  telegram: 'Telegram',
+};
 
-function sourceKey(source: string): `videos.source.${VideoSource}` | null {
-  return SOURCES.includes(source as VideoSource) ? `videos.source.${source as VideoSource}` : null;
+function sourceLabel(source: string): string {
+  return SOURCE_LABEL[source] ?? source;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+/** A finished file. Failed rows with nothing stored are not videos. */
+function isLibraryVideo(job: VideoJob): boolean {
+  return job.status === 'done' || Boolean(job.file);
 }
 
 function VideoCard({ job }: { job: VideoJob }) {
@@ -21,8 +55,6 @@ function VideoCard({ job }: { job: VideoJob }) {
   const title = job.title?.trim() || t('videos.untitled');
   const when = formatWhen(job.finishedAt ?? job.createdAt, i18n.language);
   const duration = job.file?.durationSec ?? 0;
-  const srcKey = sourceKey(job.source);
-  const busy = job.status === 'queued' || job.status === 'running' || job.status === 'failed';
 
   return (
     <Link
@@ -48,18 +80,56 @@ function VideoCard({ job }: { job: VideoJob }) {
       <div className="space-y-1 px-3 py-3">
         <p className="line-clamp-2 text-[15px] font-semibold leading-snug">{title}</p>
         <p className="text-xs text-muted">
-          {srcKey ? t(srcKey) : job.source}
+          {sourceLabel(job.source)}
           {when ? ` · ${when}` : ''}
         </p>
-        {busy && (
-          <p className={`text-xs font-semibold ${job.status === 'failed' ? 'text-danger' : 'text-highlight'}`}>
-            {job.status === 'running'
-              ? t('videos.status.running', { pct: Math.round(job.progress?.pct ?? 0) })
-              : t(`videos.status.${job.status}`)}
-          </p>
-        )}
       </div>
     </Link>
+  );
+}
+
+function ActiveDownload({ job }: { job: VideoJob }) {
+  const { t } = useTranslation();
+  const where = hostOf(job.url) || sourceLabel(job.source);
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-3 py-2.5">
+      <p className="min-w-0 truncate text-sm text-muted">{where}</p>
+      <p className="shrink-0 text-xs font-semibold text-highlight">
+        {job.status === 'running'
+          ? t('videos.status.running', { pct: Math.round(job.progress?.pct ?? 0) })
+          : t('videos.status.queued')}
+      </p>
+    </div>
+  );
+}
+
+function LibraryList({ items, empty }: { items: VideoJob[]; empty: string }) {
+  const videos = items.filter(isLibraryVideo);
+  const active = items.filter((job) => job.status === 'queued' || job.status === 'running');
+  if (videos.length === 0 && active.length === 0) {
+    return <EmptyState icon={<Clapperboard className="h-8 w-8" aria-hidden />}>{empty}</EmptyState>;
+  }
+  return (
+    <div className="grid gap-3">
+      {active.length > 0 && (
+        <ul className="grid gap-2">
+          {active.map((job) => (
+            <li key={job.id}>
+              <ActiveDownload job={job} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {videos.length > 0 && (
+        <ul className="grid gap-3">
+          {videos.map((job) => (
+            <li key={job.id}>
+              <VideoCard job={job} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -131,18 +201,7 @@ export function VideoLibraryPage() {
             <div className="h-40 animate-pulse rounded-3xl bg-surface-2" />
           </div>
         )}
-        {list.isSuccess && list.data.items.length === 0 && (
-          <EmptyState icon={<Clapperboard className="h-8 w-8" aria-hidden />}>{t('videos.empty')}</EmptyState>
-        )}
-        {list.isSuccess && list.data.items.length > 0 && (
-          <ul className="grid gap-3">
-            {list.data.items.map((job) => (
-              <li key={job.id}>
-                <VideoCard job={job} />
-              </li>
-            ))}
-          </ul>
-        )}
+        {list.isSuccess && <LibraryList items={list.data.items} empty={t('videos.empty')} />}
       </div>
     </div>
   );

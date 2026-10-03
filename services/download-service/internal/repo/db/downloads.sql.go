@@ -389,6 +389,7 @@ const listUserJobs = `-- name: ListUserJobs :many
 SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at, display_title, deleted_at FROM download.jobs
 WHERE user_id = $1
   AND deleted_at IS NULL
+  AND NOT (status = 'failed' AND media_id IS NULL)
   AND ($2::timestamptz IS NULL
        OR (created_at, id) < ($2::timestamptz, $3::uuid))
 ORDER BY created_at DESC, id DESC

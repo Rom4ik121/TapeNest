@@ -173,7 +173,7 @@
   },
   "videos": {
     "title": "My videos",
-    "subtitle": "A YouTube, VK or RuTube link stays here after download",
+    "subtitle": "A link from YouTube, VK, RuTube, TikTok or another public video host stays here",
     "url": "Video link",
     "download": "Download",
     "downloading": "Taking the link…",
@@ -263,7 +263,7 @@
     },
     "errors": {
       "invalid": "Couldn't parse that link. Check that the whole URL was copied.",
-      "unsupported": "That site isn't supported. Use a YouTube, VK or RuTube link.",
+      "unsupported": "That site isn't supported. Paste a link from a public video host.",
       "playlist": "Playlists aren't downloaded — send a link to one video.",
       "quotaActive": "Three downloads are already running. Wait for one to finish.",
       "quotaDaily": "The daily download limit is used up. Try again tomorrow.",

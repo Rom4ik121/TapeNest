@@ -1,6 +1,6 @@
 {
-  "start.greeting": "Hi, {name}! 👋\n\nI'm TapeNest — music and video right inside Telegram.\n\n🎧 Open WavePlayer with the button below or from the menu next to the message field.\n🔗 Send me a YouTube, VK or RuTube video link — I'll download it and send the file here.",
-  "start.greeting_anon": "Hi! 👋\n\nI'm TapeNest — music and video right inside Telegram.\n\n🎧 Open WavePlayer with the button below or from the menu next to the message field.\n🔗 Send me a YouTube, VK or RuTube video link — I'll download it and send the file here.",
+  "start.greeting": "Hi, {name}! 👋\n\nI'm TapeNest — music and video right inside Telegram.\n\n🎧 Open WavePlayer with the button below or from the menu next to the message field.\n🔗 Send a link from YouTube, VK, RuTube, TikTok or another public video host — I'll download it and send the file here.",
+  "start.greeting_anon": "Hi! 👋\n\nI'm TapeNest — music and video right inside Telegram.\n\n🎧 Open WavePlayer with the button below or from the menu next to the message field.\n🔗 Send a link from YouTube, VK, RuTube, TikTok or another public video host — I'll download it and send the file here.",
   "button.waveplayer": "🎧 Open WavePlayer",
   "button.videos": "🎬 My videos",
   "help.text": "Here's what I can do:\n\n/start — welcome message and buttons\n/help — this help\n/videos — my downloaded videos\n\n🎧 WavePlayer — a player with My Wave, likes and playlists.\n🔗 Video downloads: send a link ({sources}). Files up to 50 MB arrive right in the chat (up to 720p); for bigger ones you get a link valid for 1 hour. The clip stays in My videos, where you can open, rename, trim or delete it. Up to 3 downloads at a time, 30 per day. Playlists, live streams and DRM-protected content are not downloaded.",
@@ -17,7 +17,7 @@
   "commands.help": "What the bot can do",
   "commands.videos": "My downloaded videos",
   "videos.open": "🎬 My videos — clips you sent as a link. Open one, rename it, trim it or delete it.",
-  "videos.noCinema": "TapeNest no longer has a cinema — no film catalog and no torrents.\n\nSend a YouTube, VK or RuTube link and I'll download it into My videos.",
+  "videos.noCinema": "TapeNest no longer has a cinema — no film catalog and no torrents.\n\nSend a link from YouTube, VK, RuTube, TikTok or another public video host and I'll download it into My videos.",
   "link.playlist": "📃 I don't download playlists — send a link to a single video.",
   "link.quota_active": "🚦 You already have 3 downloads in progress. Wait for one to finish and send the link again.",
   "link.quota_daily": "📅 Daily download limit reached (30 per day). Try again tomorrow.",
