@@ -23,6 +23,11 @@ export function FullPlayer() {
   const [dragValue, setDragValue] = useState<number | null>(null);
   const [menu, setMenu] = useState(false);
   const { toggle, next, prev, seek, toggleLikeCurrent, openFullPlayer } = playerStore.getState();
+  const trackId = track?.id;
+
+  useEffect(() => {
+    setDragValue(null);
+  }, [trackId]);
 
   useEffect(() => {
     if (!open) return;
@@ -164,6 +169,7 @@ export function FullPlayer() {
             type="button"
             onClick={() => {
               haptic('light');
+              setDragValue(null);
               prev();
             }}
             aria-label={t('player.prev')}
@@ -181,6 +187,7 @@ export function FullPlayer() {
             type="button"
             onClick={() => {
               haptic('light');
+              setDragValue(null);
               void next();
             }}
             aria-label={t('player.next')}

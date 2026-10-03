@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StreamUrl, Track } from '@/shared/api/types';
 import { FakeEngine } from '../../../test/fakeEngine';
 import { deferred, flush, track } from '../../../test/fixtures';
-import { createPlayerStore, type PlayerDeps } from './playerStore';
+import { BACK_DOUBLE_PRESS_MS, createPlayerStore, type PlayerDeps } from './playerStore';
 
 function setup(overrides: Partial<PlayerDeps> = {}) {
   const engine = new FakeEngine();
@@ -258,16 +258,122 @@ describe('playerStore', () => {
     expect(engine.position).toBe(42);
   });
 
-  it('prev(): restarts the track after 3 s, otherwise goes back', async () => {
+  it('prev(): after more than 10 s one press restarts, a second press skips back', async () => {
+    const { store, engine } = setup();
+    store.getState().playQueue(tracks, 1);
+    await flush();
+    engine.tick(10.1, 100);
+    store.getState().prev();
+    expect(store.getState().index).toBe(1);
+    expect(store.getState().positionSec).toBe(0);
+    expect(engine.position).toBe(0);
+
+    store.getState().prev();
+    expect(store.getState().index).toBe(0);
+    expect(store.getState().positionSec).toBe(0);
+    // The element can still report the track we just left.
+    engine.tick(10.1, 100);
+    expect(store.getState().positionSec).toBe(0);
+    await flush();
+    expect(store.getState().positionSec).toBe(0);
+    expect(engine.src).toBe('blob:a');
+  });
+
+  it('prev(): at 10 s or less one press goes to the previous track at 0', async () => {
     const { store, engine } = setup();
     store.getState().playQueue(tracks, 1);
     await flush();
     engine.tick(10, 100);
     store.getState().prev();
-    expect(engine.position).toBe(0);
-    store.getState().prev();
-    await flush();
     expect(store.getState().index).toBe(0);
+    expect(store.getState().positionSec).toBe(0);
+    engine.tick(10, 100);
+    expect(store.getState().positionSec).toBe(0);
+    await flush();
+    expect(engine.src).toBe('blob:a');
+    expect(store.getState().positionSec).toBe(0);
+  });
+
+  it('prev(): a double press near the start skips only one track', async () => {
+    const { store, engine } = setup();
+    store.getState().playQueue(tracks, 2);
+    await flush();
+    engine.tick(4, 100);
+    store.getState().prev();
+    expect(store.getState().index).toBe(1);
+    expect(store.getState().positionSec).toBe(0);
+    store.getState().prev();
+    expect(store.getState().index).toBe(1);
+    expect(store.getState().positionSec).toBe(0);
+  });
+
+  it('prev(): after the double-press window, back skips another track', async () => {
+    vi.useFakeTimers();
+    const { store, engine } = setup();
+    store.getState().playQueue(tracks, 2);
+    await vi.advanceTimersByTimeAsync(0);
+    engine.tick(4, 100);
+    store.getState().prev();
+    expect(store.getState().index).toBe(1);
+    await vi.advanceTimersByTimeAsync(BACK_DOUBLE_PRESS_MS + 1);
+    store.getState().prev();
+    expect(store.getState().index).toBe(0);
+    expect(store.getState().positionSec).toBe(0);
+  });
+
+  it('resets the playhead when the track changes and ignores the previous position while loading', async () => {
+    const gate = deferred<StreamUrl>();
+    let calls = 0;
+    const { store, engine } = setup({
+      streamUrl: vi.fn((id: string) => {
+        calls += 1;
+        if (calls > 1) return gate.promise;
+        return Promise.resolve({ url: `blob:${id}`, expiresAt: '' });
+      }),
+    });
+    store.getState().playQueue(tracks, 0);
+    await flush();
+    engine.tick(42, 180);
+    expect(store.getState().positionSec).toBe(42);
+
+    const pending = store.getState().next();
+    expect(store.getState().index).toBe(1);
+    expect(store.getState().status).toBe('loading');
+    expect(store.getState().positionSec).toBe(0);
+    expect(store.getState().durationSec).toBe(tracks[1]!.durationSec);
+
+    engine.tick(42, 180);
+    expect(store.getState().positionSec).toBe(0);
+    expect(store.getState().durationSec).toBe(tracks[1]!.durationSec);
+
+    gate.resolve({ url: 'blob:b', expiresAt: '' });
+    await pending;
+    await flush();
+    expect(store.getState().status).toBe('playing');
+    expect(store.getState().positionSec).toBe(0);
+    engine.tick(2, 100);
+    expect(store.getState().positionSec).toBe(2);
+  });
+
+  it('keeps a restored resume position while that stream is still loading', async () => {
+    const gate = deferred<StreamUrl>();
+    const { store, engine } = setup({ streamUrl: vi.fn(() => gate.promise) });
+    store.getState().restore({
+      queue: tracks,
+      index: 1,
+      positionSec: 42,
+      savedAt: Date.now(),
+    });
+    store.getState().toggle();
+    expect(store.getState().status).toBe('loading');
+    expect(store.getState().positionSec).toBe(42);
+    engine.tick(0, 100);
+    engine.tick(7, 100);
+    expect(store.getState().positionSec).toBe(42);
+    gate.resolve({ url: 'blob:b', expiresAt: '' });
+    await flush();
+    expect(engine.position).toBe(42);
+    expect(store.getState().positionSec).toBe(42);
   });
 
   it('stops at the end of a non-wave queue', async () => {

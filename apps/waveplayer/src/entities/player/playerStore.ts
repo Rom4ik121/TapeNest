@@ -38,6 +38,11 @@ export interface PlayerActions {
   startWave(mode?: WaveMode): Promise<void>;
   toggle(): void;
   next(auto?: boolean): Promise<void>;
+  /**
+   * Back control. After 10s a single press restarts the current track; a
+   * second press in that gesture skips to the previous track. At 10s or less,
+   * one press skips to the previous track.
+   */
   prev(): void;
   seek(sec: number): void;
   setLiked(trackId: string, liked: boolean): void;
@@ -73,6 +78,10 @@ export interface PlayerDeps {
 
 const WAVE_PREFETCH_THRESHOLD = 5;
 const MAX_CONSECUTIVE_FAILURES = 3;
+/** A single back press restarts the current track only after this point. */
+export const BACK_RESTART_AFTER_SEC = 10;
+/** Two back presses inside this window are one gesture. */
+export const BACK_DOUBLE_PRESS_MS = 400;
 
 const initialState: PlayerState = {
   queue: [],
@@ -101,6 +110,13 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
   let loadToken = 0;
   let loadAbort: AbortController | null = null;
   let consecutiveFailures = 0;
+  let lastBackAt = 0;
+  let lastBackAction: 'restart' | 'previous' | null = null;
+  /**
+   * True from the moment a new track is requested until its source starts.
+   * Time events in that window still belong to the element we are leaving.
+   */
+  let ignoreEngineTime = false;
 
   const tracker = createListenTracker((id, pos, completed) => swallow(deps.reportListened(id, pos, completed)));
   const saver = createPositionSaver(deps.savePosition, deps.positionDebounceMs ?? 5000);
@@ -128,6 +144,7 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
       const abort = new AbortController();
       loadAbort = abort;
 
+      ignoreEngineTime = true;
       tracker.begin(track.id);
       // Status first: the engine's 'pause' event must not be mistaken for a
       // user pause (it would save the old position under the new track id).
@@ -150,7 +167,9 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
         set({ status: 'error' });
         if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES && get().index < get().queue.length - 1) {
           await get().next(true);
+          return;
         }
+        ignoreEngineTime = false;
         return;
       }
       if (token !== loadToken) return; // a newer track was requested meanwhile
@@ -158,10 +177,29 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
       engine.load(url, startAtSec);
       const started = await engine.play();
       if (token !== loadToken) return;
+      ignoreEngineTime = false;
       consecutiveFailures = 0;
       // isPlaying is driven by real media events; if play() was rejected
       // (autoplay policy) we show a "tap to play" state instead of lying.
       if (!started) set({ status: 'blocked' });
+    };
+
+    /**
+     * Point the queue at `index` and zero the playhead in the same update,
+     * before the new stream URL resolves. `startCurrent` keeps that 0 in
+     * place while the element may still be reporting the previous track.
+     */
+    const switchTo = (index: number): void => {
+      const nextTrack = get().queue[index];
+      if (!nextTrack) return;
+      set({
+        index,
+        status: 'loading',
+        positionSec: 0,
+        durationSec: nextTrack.durationSec,
+        resumeAtSec: 0,
+      });
+      void startCurrent(0);
     };
 
     const extendWave = async (): Promise<boolean> => {
@@ -189,9 +227,16 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
         if (tracks.length === 0) return;
         leaveCurrent();
         consecutiveFailures = 0;
+        const index = Math.min(Math.max(0, startIndex), tracks.length - 1);
+        const first = tracks[index];
+        if (!first) return;
         set({
           queue: tracks,
-          index: Math.min(Math.max(0, startIndex), tracks.length - 1),
+          index,
+          status: 'loading',
+          positionSec: 0,
+          durationSec: first.durationSec,
+          resumeAtSec: 0,
           waveSessionId,
           waveFallback: false,
         });
@@ -255,14 +300,12 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
 
         const nextIndex = s.index + 1;
         if (nextIndex < s.queue.length) {
-          set({ index: nextIndex });
-          void startCurrent(0);
+          switchTo(nextIndex);
           if (s.waveSessionId && s.queue.length - nextIndex <= WAVE_PREFETCH_THRESHOLD) void extendWave();
           return;
         }
         if (s.waveSessionId && (await extendWave())) {
-          set({ index: nextIndex });
-          void startCurrent(0);
+          switchTo(nextIndex);
           return;
         }
         // End of a non-wave queue: stop at the end.
@@ -271,15 +314,25 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
       },
 
       prev() {
+        const now = Date.now();
+        const rapid = lastBackAction !== null && now - lastBackAt <= BACK_DOUBLE_PRESS_MS;
+        lastBackAt = now;
+
         const s = get();
         deps.haptic?.('light');
-        if (s.positionSec > 3 || s.index === 0) {
+        // The first tap already changed tracks; this one only completes the gesture.
+        if (rapid && lastBackAction === 'previous') return;
+
+        const goPrevious = s.index > 0 && (rapid || s.positionSec <= BACK_RESTART_AFTER_SEC);
+        if (!goPrevious) {
+          lastBackAction = 'restart';
           get().seek(0);
           return;
         }
+
+        lastBackAction = 'previous';
         leaveCurrent();
-        set({ index: s.index - 1 });
-        void startCurrent(0);
+        switchTo(s.index - 1);
       },
 
       seek(sec) {
@@ -349,8 +402,12 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
     }
   });
   engine.on('time', ({ positionSec, durationSec }) => {
+    // Dropped until the source we just requested is the one playing. Otherwise
+    // the previous track's currentTime is painted on the new track while its
+    // stream URL is still loading. A wave fetch also uses status 'loading'
+    // but has not switched tracks, so those ticks still count.
+    if (ignoreEngineTime) return;
     const s = store.getState();
-    if (s.status === 'loading' && positionSec === 0) return;
     const track = s.queue[s.index];
     store.setState({
       positionSec,
