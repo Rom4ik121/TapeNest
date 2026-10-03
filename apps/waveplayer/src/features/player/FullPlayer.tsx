@@ -1,4 +1,4 @@
-import { ChevronDown, Heart, ListPlus, SkipBack, SkipForward, Waves } from 'lucide-react';
+import { ChevronDown, Heart, ListPlus, Repeat1, SkipBack, SkipForward, Waves } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -20,9 +20,10 @@ export function FullPlayer() {
   const dur = usePlayer((s) => s.durationSec);
   const buffering = usePlayer((s) => s.buffering);
   const wave = usePlayer((s) => s.waveSessionId !== null);
+  const repeatOne = usePlayer((s) => s.repeatOne);
   const [dragValue, setDragValue] = useState<number | null>(null);
   const [menu, setMenu] = useState(false);
-  const { toggle, next, prev, seek, toggleLikeCurrent, openFullPlayer } = playerStore.getState();
+  const { toggle, next, prev, seek, toggleLikeCurrent, toggleRepeat, openFullPlayer } = playerStore.getState();
 
   useEffect(() => {
     if (!open) return;
@@ -159,7 +160,22 @@ export function FullPlayer() {
           </div>
         </div>
 
-        <div className="mb-6 mt-4 flex items-center justify-between px-2">
+        <div className="mb-6 mt-4 flex items-center justify-center gap-1 px-2">
+          <button
+            type="button"
+            onClick={() => {
+              haptic('light');
+              toggleRepeat();
+            }}
+            aria-pressed={repeatOne}
+            aria-label={repeatOne ? t('player.repeatOn') : t('player.repeat')}
+            className={cn(
+              'grid h-12 w-12 place-items-center rounded-full active:scale-90',
+              repeatOne ? 'bg-cream text-ink' : 'text-cream/80',
+            )}
+          >
+            <Repeat1 className="h-6 w-6" aria-hidden />
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -188,6 +204,7 @@ export function FullPlayer() {
           >
             <SkipForward className="h-8 w-8 fill-current" aria-hidden />
           </button>
+          <span className="h-12 w-12 shrink-0" aria-hidden />
         </div>
       </div>
       <AddToPlaylistSheet track={menu ? track : null} onClose={() => setMenu(false)} />

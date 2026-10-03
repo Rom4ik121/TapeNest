@@ -55,12 +55,33 @@ export const authApi = {
 
 export type TrackListKind = 'recent' | 'popular' | 'liked';
 
+/** Every page of a cursor list, in order, without duplicate ids. */
+export async function listAllTracks(kind: TrackListKind, signal?: AbortSignal): Promise<Track[]> {
+  const out: Track[] = [];
+  const seen = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < 100; page++) {
+    const res = await tracksApi.list(kind, cursor, signal);
+    for (const t of res.items) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      out.push(t);
+    }
+    if (!res.nextCursor || cursors.has(res.nextCursor)) return out;
+    cursors.add(res.nextCursor);
+    cursor = res.nextCursor;
+  }
+  return out;
+}
+
 export const tracksApi = {
   list: (kind: TrackListKind, cursor: string | null, signal?: AbortSignal) =>
     api<Page<Track>>(`/tracks/${kind}`, {
       query: { cursor, limit: PAGE_SIZE },
       signal,
     }).then(pageWithMedia),
+  listAll: listAllTracks,
   search: (q: string, cursor: string | null, signal?: AbortSignal) =>
     api<Page<Track>>('/tracks/search', {
       query: { q, cursor, limit: PAGE_SIZE },

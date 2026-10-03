@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { StreamUrl, Track, WaveFeedbackAction, WaveMode, WaveSession, Page } from '@/shared/api/types';
+import { audibleDuration, mediaRunsPastSong } from './audibleDuration';
 import type { AudioEngineLike } from './audioEngine';
 import { createListenTracker } from './listenTracker';
 import { createPositionSaver, type SavePositionFn } from './positionSaver';
@@ -29,6 +30,8 @@ export interface PlayerState {
   /** Position to resume from on the next play of the current track (restored session). */
   resumeAtSec: number;
   fullPlayerOpen: boolean;
+  /** Loop the current track instead of advancing when it ends. */
+  repeatOne: boolean;
 }
 
 export interface PlayerActions {
@@ -39,6 +42,7 @@ export interface PlayerActions {
   toggle(): void;
   next(auto?: boolean): Promise<void>;
   prev(): void;
+  toggleRepeat(): void;
   seek(sec: number): void;
   setLiked(trackId: string, liked: boolean): void;
   toggleLikeCurrent(): void;
@@ -69,6 +73,11 @@ export interface PlayerDeps {
   persistSession?(queue: Track[], index: number, positionSec: number): void;
   haptic?(kind: 'light' | 'success'): void;
   positionDebounceMs?: number;
+  /**
+   * Warm the following track (stream URL + first media bytes) so next and
+   * auto-advance do not wait on a cold YouTube resolve.
+   */
+  warm?(trackId: string, signal: AbortSignal): Promise<void>;
 }
 
 const WAVE_PREFETCH_THRESHOLD = 5;
@@ -87,6 +96,7 @@ const initialState: PlayerState = {
   waveMode: 'default',
   resumeAtSec: 0,
   fullPlayerOpen: false,
+  repeatOne: false,
 };
 
 const noop = (): void => undefined;
@@ -100,7 +110,11 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
   // stale stream-url race when tracks are switched quickly).
   let loadToken = 0;
   let loadAbort: AbortController | null = null;
+  let warmAbort: AbortController | null = null;
   let consecutiveFailures = 0;
+  /** Natural end is in progress — ignore the pause it causes and a second ended. */
+  let finishing = false;
+  let finishCurrent = (): void => undefined;
 
   const tracker = createListenTracker((id, pos, completed) => swallow(deps.reportListened(id, pos, completed)));
   const saver = createPositionSaver(deps.savePosition, deps.positionDebounceMs ?? 5000);
@@ -120,9 +134,49 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
       saver.flush();
     };
 
+    const prefetchNext = (): void => {
+      if (!deps.warm) return;
+      warmAbort?.abort();
+      const nxt = get().queue[get().index + 1];
+      if (!nxt) {
+        warmAbort = null;
+        return;
+      }
+      const abort = new AbortController();
+      warmAbort = abort;
+      swallow(deps.warm(nxt.id, abort.signal));
+    };
+
+    /** Song finished (element ended, or the audible catalog length was reached). */
+    finishCurrent = (): void => {
+      if (finishing) return;
+      const s = get();
+      // The element pauses itself before `ended`, so a finished song is already
+      // "paused" by the time we hear about it. A user pause never emits `ended`.
+      if (s.status !== 'playing' && s.status !== 'paused') return;
+      finishing = true;
+      const track = s.queue[s.index];
+      if (track) {
+        tracker.complete(s.durationSec || track.durationSec);
+        saver.update(track.id, 0);
+        saver.flush();
+      }
+      // Finished → next time start from the beginning.
+      set({ positionSec: 0 });
+      engine.pause();
+      if (get().repeatOne) {
+        void startCurrent(0);
+        return;
+      }
+      void get().next(true);
+    };
+
     const startCurrent = async (startAtSec = 0): Promise<void> => {
       const track = current();
-      if (!track) return;
+      if (!track) {
+        finishing = false;
+        return;
+      }
       const token = ++loadToken;
       loadAbort?.abort();
       const abort = new AbortController();
@@ -137,8 +191,10 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
         durationSec: track.durationSec,
         resumeAtSec: 0,
       });
+      finishing = false;
       engine.pause();
       persist();
+      prefetchNext();
 
       let url: string;
       try {
@@ -175,6 +231,7 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
         const more = await deps.waveMore(sessionId, last.id);
         if (get().waveSessionId !== sessionId) return false; // queue replaced meanwhile
         set((st) => ({ queue: [...st.queue, ...more], waveFetching: false }));
+        prefetchNext();
         return more.length > 0;
       } catch {
         set({ waveFetching: false });
@@ -268,6 +325,7 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
         // End of a non-wave queue: stop at the end.
         engine.pause();
         set({ status: 'paused' });
+        finishing = false;
       },
 
       prev() {
@@ -280,6 +338,10 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
         leaveCurrent();
         set({ index: s.index - 1 });
         void startCurrent(0);
+      },
+
+      toggleRepeat() {
+        set((st) => ({ repeatOne: !st.repeatOne }));
       },
 
       seek(sec) {
@@ -342,6 +404,7 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
   engine.on('playing', () => store.setState({ status: 'playing', buffering: false }));
   engine.on('waiting', () => store.setState({ buffering: true }));
   engine.on('pause', () => {
+    if (finishing) return;
     const s = store.getState();
     if (s.status === 'playing') {
       store.setState({ status: 'paused' });
@@ -352,25 +415,26 @@ export function createPlayerStore(deps: PlayerDeps): StoreApi<PlayerStore> {
     const s = store.getState();
     if (s.status === 'loading' && positionSec === 0) return;
     const track = s.queue[s.index];
+    if (!track) return;
+    const audible = audibleDuration(track.durationSec, durationSec);
+    const pos = audible > 0 ? Math.min(positionSec, audible) : positionSec;
+    // YouTube's container keeps moving after the song. End at the catalog length.
+    if (s.status === 'playing' && mediaRunsPastSong(track.durationSec, durationSec) && positionSec >= track.durationSec) {
+      store.setState({ positionSec: track.durationSec, durationSec: track.durationSec });
+      finishCurrent();
+      return;
+    }
     store.setState({
-      positionSec,
-      ...(durationSec > 0 ? { durationSec } : {}),
+      positionSec: pos,
+      ...(audible > 0 ? { durationSec: audible } : {}),
     });
-    if (track && s.status === 'playing') {
-      tracker.progress(positionSec, durationSec || track.durationSec);
-      saver.update(track.id, positionSec);
+    if (s.status === 'playing') {
+      tracker.progress(pos, audible || track.durationSec);
+      saver.update(track.id, pos);
     }
   });
-  engine.on('ended', ({ durationSec }) => {
-    const s = store.getState();
-    const track = s.queue[s.index];
-    if (track) {
-      tracker.complete(durationSec || track.durationSec);
-      // Finished → next time start from the beginning.
-      store.setState({ positionSec: 0 });
-      saver.update(track.id, 0);
-    }
-    void s.next(true);
+  engine.on('ended', () => {
+    finishCurrent();
   });
   engine.on('error', () => {
     const s = store.getState();
