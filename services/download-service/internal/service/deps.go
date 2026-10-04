@@ -32,6 +32,11 @@ type Store interface {
 	GetMedia(ctx context.Context, id uuid.UUID) (domain.Media, error)
 	GetMediaByHash(ctx context.Context, hash string) (domain.Media, error)
 	UpsertMedia(ctx context.Context, m domain.Media) (domain.Media, error)
+	ListJobs(ctx context.Context, status string, after *repo.Cursor, limit int) ([]domain.Job, error)
+	RetryFailed(ctx context.Context, id uuid.UUID) (domain.Job, error)
+	DeleteDoneJob(ctx context.Context, id uuid.UUID) (domain.Job, error)
+	CountMediaJobs(ctx context.Context, mediaID uuid.UUID) (int, error)
+	DeleteMedia(ctx context.Context, id uuid.UUID) error
 }
 
 // Queue schedules jobs (mq.Queue).
@@ -56,6 +61,7 @@ type Files interface {
 	Exists(ctx context.Context, key string) (bool, error)
 	PresignInternal(ctx context.Context, key, fileName string, ttl time.Duration) (string, error)
 	PresignPublic(ctx context.Context, key, fileName string, ttl time.Duration) (string, error)
+	Remove(ctx context.Context, key string) error
 }
 
 // Fetcher runs yt-dlp (ytdlp.Runner).

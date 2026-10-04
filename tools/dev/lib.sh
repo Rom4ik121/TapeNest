@@ -68,7 +68,9 @@ start_infra() { "$ROOT/tools/dev/infra-native.sh" up; }
 start_gateway() {
   stop_proc api-gateway
   build_go api-gateway
-  spawn api-gateway "$BIN_DIR/api-gateway"
+  BOT_SERVICE_URL="${BOT_SERVICE_URL:-http://127.0.0.1:${BOT_SERVICE_PORT:-8081}}" \
+  RECO_SERVICE_URL="${RECO_SERVICE_URL:-http://127.0.0.1:${RECO_SERVICE_PORT:-8086}}" \
+    spawn api-gateway "$BIN_DIR/api-gateway"
   wait_http "http://127.0.0.1:${API_GATEWAY_PORT:-8080}/readyz" 20 || { echo "api-gateway not ready, see $LOG_DIR/api-gateway.log" >&2; return 1; }
   echo "api-gateway up (pid $(pid_of api-gateway))"
 }
@@ -95,6 +97,17 @@ start_cinenest() {
   echo "cinenest up (pid $(pid_of cinenest))"
 }
 
+# Admin mini app (apps/admin, base /admin/) — reached via the WavePlayer Vite proxy.
+start_admin() {
+  stop_proc admin
+  local host="${1:-}"
+  (cd "$ROOT/apps/admin" && { [[ -d node_modules ]] || npm ci; } &&
+    VITE_DEV_PUBLIC_HOST="$host" GATEWAY_URL="http://127.0.0.1:${API_GATEWAY_PORT:-8080}" \
+    spawn admin npx vite --port "${ADMIN_PORT:-5175}" --strictPort)
+  wait_http "http://127.0.0.1:${ADMIN_PORT:-5175}/admin/" 40 || { echo "admin not ready" >&2; return 1; }
+  echo "admin up (pid $(pid_of admin))"
+}
+
 start_ngrok() {
   if is_running ngrok && [[ -n "$(ngrok_url)" && "${NGROK_RESTART:-0}" != 1 ]]; then
     echo "ngrok already running (pid $(pid_of ngrok)) — URL kept"; return 0
@@ -115,6 +128,7 @@ start_bot() {
   stop_proc bot-service
   build_go bot-service
   TELEGRAM_WEBHOOK_URL="$url/tg/webhook" MINIAPP_WAVEPLAYER_URL="$url/" MINIAPP_CINENEST_URL="$url/cinenest/" \
+    MINIAPP_ADMIN_URL="$url/admin/" \
     spawn bot-service "$BIN_DIR/bot-service"
   wait_http "http://127.0.0.1:${BOT_SERVICE_PORT:-8081}/readyz" 30 || { echo "bot-service not ready, see $LOG_DIR/bot-service.log" >&2; return 1; }
   echo "$url" >"$LOG_DIR/miniapp-url.txt"

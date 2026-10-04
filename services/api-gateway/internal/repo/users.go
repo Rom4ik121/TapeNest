@@ -62,6 +62,26 @@ func (r *Users) GetByID(ctx context.Context, id uuid.UUID) (domain.User, error) 
 	return toDomain(row), nil
 }
 
+// ListUsers returns the newest accounts, profile fields only.
+func (r *Users) ListUsers(ctx context.Context, limit int) ([]domain.User, error) {
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.q.ListUsers(ctx, int32(limit)) //nolint:gosec // limit is clamped above
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	out := make([]domain.User, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, domain.User{
+			ID: row.ID, TelegramID: row.TelegramID, FirstName: row.FirstName, LastName: row.LastName,
+			Username: row.Username, LanguageCode: row.LanguageCode, Role: domain.Role(row.Role),
+			CreatedAt: row.CreatedAt, LastLoginAt: row.LastLoginAt,
+		})
+	}
+	return out, nil
+}
+
 // GetByTelegramID loads a user by Telegram id or returns domain.ErrNotFound.
 func (r *Users) GetByTelegramID(ctx context.Context, telegramID int64) (domain.User, error) {
 	row, err := r.q.GetUserByTelegramID(ctx, telegramID)

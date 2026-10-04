@@ -60,6 +60,56 @@ func (q *Queries) GetUserByTelegramID(ctx context.Context, telegramID int64) (Ga
 	return i, err
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, telegram_id, first_name, last_name, username, language_code, role, created_at, last_login_at
+FROM gateway.users
+ORDER BY created_at DESC, id DESC
+LIMIT $1
+`
+
+type ListUsersRow struct {
+	ID           uuid.UUID
+	TelegramID   int64
+	FirstName    string
+	LastName     *string
+	Username     *string
+	LanguageCode *string
+	Role         string
+	CreatedAt    time.Time
+	LastLoginAt  *time.Time
+}
+
+// Admin directory. No secrets: profile columns only (no tokens live in this table).
+func (q *Queries) ListUsers(ctx context.Context, lim int32) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers, lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TelegramID,
+			&i.FirstName,
+			&i.LastName,
+			&i.Username,
+			&i.LanguageCode,
+			&i.Role,
+			&i.CreatedAt,
+			&i.LastLoginAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertTelegramUser = `-- name: UpsertTelegramUser :one
 INSERT INTO gateway.users (
     id, telegram_id, first_name, last_name, username, photo_url, language_code, is_premium, role, last_login_at

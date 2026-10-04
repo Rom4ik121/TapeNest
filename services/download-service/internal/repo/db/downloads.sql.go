@@ -12,6 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const countMediaJobs = `-- name: CountMediaJobs :one
+SELECT count(*)::int AS n FROM download.jobs WHERE media_id = $1
+`
+
+func (q *Queries) CountMediaJobs(ctx context.Context, mediaID *uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countMediaJobs, mediaID)
+	var n int32
+	err := row.Scan(&n)
+	return n, err
+}
+
 const countUserJobs = `-- name: CountUserJobs :one
 SELECT count(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active,
        count(*) FILTER (WHERE created_at > $1::timestamptz)::int AS recent
@@ -34,6 +45,50 @@ func (q *Queries) CountUserJobs(ctx context.Context, arg CountUserJobsParams) (C
 	var i CountUserJobsRow
 	err := row.Scan(&i.Active, &i.Recent)
 	return i, err
+}
+
+const deleteDoneJob = `-- name: DeleteDoneJob :one
+DELETE FROM download.jobs
+WHERE id = $1 AND status = 'done'
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at
+`
+
+func (q *Queries) DeleteDoneJob(ctx context.Context, id uuid.UUID) (DownloadJob, error) {
+	row := q.db.QueryRow(ctx, deleteDoneJob, id)
+	var i DownloadJob
+	err := row.Scan(
+		&i.UserID,
+		&i.ID,
+		&i.Url,
+		&i.NormalizedUrl,
+		&i.UrlHash,
+		&i.Source,
+		&i.Status,
+		&i.Stage,
+		&i.Priority,
+		&i.Attempts,
+		&i.ErrorKind,
+		&i.ErrorMessage,
+		&i.MediaID,
+		&i.Title,
+		&i.ChatID,
+		&i.StatusMessageID,
+		&i.ReplyToMessageID,
+		&i.Lang,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const deleteMedia = `-- name: DeleteMedia :exec
+DELETE FROM download.media WHERE id = $1
+`
+
+func (q *Queries) DeleteMedia(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteMedia, id)
+	return err
 }
 
 const findActiveUserJob = `-- name: FindActiveUserJob :one
@@ -359,6 +414,70 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (DownloadJ
 	return i, err
 }
 
+const listJobsAdmin = `-- name: ListJobsAdmin :many
+SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at FROM download.jobs
+WHERE ($1::text IS NULL OR $1::text = '' OR status = $1)
+  AND ($2::timestamptz IS NULL
+       OR (created_at, id) < ($2::timestamptz, $3::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+type ListJobsAdminParams struct {
+	Status        *string
+	BeforeCreated *time.Time
+	BeforeID      *uuid.UUID
+	Lim           int32
+}
+
+// Every job, including ones the owner-scoped list hides from other users.
+func (q *Queries) ListJobsAdmin(ctx context.Context, arg ListJobsAdminParams) ([]DownloadJob, error) {
+	rows, err := q.db.Query(ctx, listJobsAdmin,
+		arg.Status,
+		arg.BeforeCreated,
+		arg.BeforeID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DownloadJob
+	for rows.Next() {
+		var i DownloadJob
+		if err := rows.Scan(
+			&i.UserID,
+			&i.ID,
+			&i.Url,
+			&i.NormalizedUrl,
+			&i.UrlHash,
+			&i.Source,
+			&i.Status,
+			&i.Stage,
+			&i.Priority,
+			&i.Attempts,
+			&i.ErrorKind,
+			&i.ErrorMessage,
+			&i.MediaID,
+			&i.Title,
+			&i.ChatID,
+			&i.StatusMessageID,
+			&i.ReplyToMessageID,
+			&i.Lang,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserJobs = `-- name: ListUserJobs :many
 SELECT user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at FROM download.jobs
 WHERE user_id = $1
@@ -484,6 +603,43 @@ func (q *Queries) Requeue(ctx context.Context, arg RequeueParams) (DownloadJob, 
 		arg.ErrorKind,
 		arg.ErrorMessage,
 	)
+	var i DownloadJob
+	err := row.Scan(
+		&i.UserID,
+		&i.ID,
+		&i.Url,
+		&i.NormalizedUrl,
+		&i.UrlHash,
+		&i.Source,
+		&i.Status,
+		&i.Stage,
+		&i.Priority,
+		&i.Attempts,
+		&i.ErrorKind,
+		&i.ErrorMessage,
+		&i.MediaID,
+		&i.Title,
+		&i.ChatID,
+		&i.StatusMessageID,
+		&i.ReplyToMessageID,
+		&i.Lang,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const retryFailedJob = `-- name: RetryFailedJob :one
+UPDATE download.jobs
+SET status = 'queued', stage = '', priority = 'low', error_kind = '', error_message = '',
+    attempts = 0, finished_at = NULL, updated_at = now()
+WHERE id = $1 AND status = 'failed'
+RETURNING user_id, id, url, normalized_url, url_hash, source, status, stage, priority, attempts, error_kind, error_message, media_id, title, chat_id, status_message_id, reply_to_message_id, lang, created_at, updated_at, finished_at
+`
+
+func (q *Queries) RetryFailedJob(ctx context.Context, id uuid.UUID) (DownloadJob, error) {
+	row := q.db.QueryRow(ctx, retryFailedJob, id)
 	var i DownloadJob
 	err := row.Scan(
 		&i.UserID,

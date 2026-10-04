@@ -53,6 +53,33 @@ SET status = 'done', stage = '', media_id = $2, title = $3, error_kind = '', err
 WHERE id = $1 AND status IN ('queued', 'running')
 RETURNING *;
 
+-- name: ListJobsAdmin :many
+-- Every job, including ones the owner-scoped list hides from other users.
+SELECT * FROM download.jobs
+WHERE (sqlc.narg(status)::text IS NULL OR sqlc.narg(status)::text = '' OR status = sqlc.narg(status))
+  AND (sqlc.narg(before_created)::timestamptz IS NULL
+       OR (created_at, id) < (sqlc.narg(before_created)::timestamptz, sqlc.narg(before_id)::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(lim);
+
+-- name: RetryFailedJob :one
+UPDATE download.jobs
+SET status = 'queued', stage = '', priority = 'low', error_kind = '', error_message = '',
+    attempts = 0, finished_at = NULL, updated_at = now()
+WHERE id = $1 AND status = 'failed'
+RETURNING *;
+
+-- name: DeleteDoneJob :one
+DELETE FROM download.jobs
+WHERE id = $1 AND status = 'done'
+RETURNING *;
+
+-- name: CountMediaJobs :one
+SELECT count(*)::int AS n FROM download.jobs WHERE media_id = $1;
+
+-- name: DeleteMedia :exec
+DELETE FROM download.media WHERE id = $1;
+
 -- name: FinishFailed :one
 UPDATE download.jobs
 SET status = 'failed', stage = '', error_kind = $2, error_message = $3, updated_at = now(), finished_at = now()

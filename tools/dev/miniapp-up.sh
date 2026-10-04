@@ -8,8 +8,9 @@
 #   acquisition-service :8088 + worker :8089 (invisible acquisition, ADR 0011)
 #   streaming-service :8094 + worker :8095 (CineNest, ADR 0013)
 #   (the CC0 test indexer is NOT started here: `tools/dev/svc.sh restart legal-indexer`)
-#   Vite dev server :5173 — proxies /api → gateway, /tg → bot-service, /cinenest → :5174, /media → MinIO
+#   Vite dev server :5173 — proxies /api → gateway, /tg → bot-service, /cinenest → :5174, /admin → :5175, /media → MinIO
 #   CineNest Vite dev server :5174 (base /cinenest/)
+#   Admin Vite dev server :5175 (base /admin/)
 #   ngrok HTTPS tunnel → :5173 (one public URL for the mini app, API and webhook)
 #   url-watch — re-registers webhook/menu button if the ngrok URL changes
 # bot-service calls setWebhook(secret_token) + setChatMenuButton + setMyCommands on start.
@@ -31,10 +32,11 @@ start_ngrok
 URL="$(ngrok_url)"
 start_vite "${URL#https://}"
 start_cinenest "${URL#https://}"
+start_admin "${URL#https://}"
 start_bot "$URL"
 start_download "$URL"
 start_watch
 echo
-echo "Mini app:  $URL  (CineNest: $URL/cinenest/)"
+echo "Mini app:  $URL  (CineNest: $URL/cinenest/, admin: $URL/admin/)"
 echo "Webhook:   $URL/tg/webhook"
-for n in api-gateway bot-service download-service download-worker music-service music-worker reco-service reco-worker acquisition-service acquisition-worker streaming-service streaming-worker vite cinenest ngrok url-watch; do printf '  %-16s pid %-8s log %s\n' "$n" "$(pid_of "$n")" "$LOG_DIR/$n.log"; done
+for n in api-gateway bot-service download-service download-worker music-service music-worker reco-service reco-worker acquisition-service acquisition-worker streaming-service streaming-worker vite cinenest admin ngrok url-watch; do printf '  %-16s pid %-8s log %s\n' "$n" "$(pid_of "$n")" "$LOG_DIR/$n.log"; done

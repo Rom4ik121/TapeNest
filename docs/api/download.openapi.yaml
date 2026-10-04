@@ -145,6 +145,45 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
         '409': { description: 'NOT_READY — job is not done (or the file expired)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: 'PUBLIC_LINKS_DISABLED — S3_PUBLIC_URL is not configured', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/admin/downloads:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [downloads]
+      summary: Every job, including ones the owner-scoped list hides
+      description: |
+        Requires `X-User-Role: admin` (the gateway sets it only for `ADMIN_TELEGRAM_IDS`).
+        Optional `status` is `queued`, `running`, `done` or `failed`. No object keys and no presigned URLs.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [queued, running, done, failed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200': { description: '{items, nextCursor}', content: { application/json: { schema: { type: object, required: [items, nextCursor], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminJob' } }, nextCursor: { type: string, nullable: true } } } } } }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/downloads/{id}/retry:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [downloads]
+      summary: Re-queue a failed job (attempts reset)
+      responses:
+        '200': { description: queued job, content: { application/json: { schema: { $ref: '#/components/schemas/AdminJob' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { description: CONFLICT — only a failed job can be retried, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/admin/downloads/{id}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/JobId'
+    delete:
+      tags: [downloads]
+      summary: Remove a finished file from that user's library
+      description: The object is deleted only when no other job still references the same media.
+      responses:
+        '204': { description: removed }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { description: CONFLICT — only a finished job can be removed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 components:
   securitySchemes:
     internal: { type: apiKey, in: header, name: X-Internal-Token, description: INTERNAL_API_TOKEN (set by api-gateway) }
@@ -168,7 +207,7 @@ components:
         message: { type: string }
         code:
           type: string
-          enum: [INVALID, INVALID_URL, UNSUPPORTED_SOURCE, PLAYLIST_NOT_SUPPORTED, FORBIDDEN_HOST, QUOTA_ACTIVE, QUOTA_DAILY, UNAUTHORIZED, NOT_FOUND, NOT_READY, PUBLIC_LINKS_DISABLED, INTERNAL, SERVICE_UNAVAILABLE]
+          enum: [INVALID, INVALID_URL, UNSUPPORTED_SOURCE, PLAYLIST_NOT_SUPPORTED, FORBIDDEN_HOST, QUOTA_ACTIVE, QUOTA_DAILY, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, NOT_READY, CONFLICT, PUBLIC_LINKS_DISABLED, INTERNAL, SERVICE_UNAVAILABLE]
     Ready:
       type: object
       additionalProperties: { type: string, enum: [ok, down] }
@@ -229,6 +268,14 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
+    AdminJob:
+      allOf:
+        - $ref: '#/components/schemas/Job'
+        - type: object
+          required: [userId]
+          properties:
+            userId: { type: string, format: uuid }
+            url: { type: string, description: 'the URL the user sent, not only the normalized form' }
     DownloadEvent:
       description: 'Redis stream `download:events`, field `data` = this JSON (at-least-once; consumers dedup by jobId)'
       type: object

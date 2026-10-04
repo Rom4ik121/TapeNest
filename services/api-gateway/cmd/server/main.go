@@ -111,6 +111,14 @@ func run(migrateOnly bool) error {
 			"redis":    httpapi.PingFunc(func(ctx context.Context) error { return rdb.Ping(ctx).Err() }),
 		},
 		Music: services[0], Download: services[1], Streaming: services[2],
+		Admins: cfg.AdminTelegramIDs,
+		Users:  repo.NewUsers(pool),
+		Probes: []httpapi.Probe{
+			{Name: "bot", URL: cfg.BotServiceURL},
+			{Name: "music", URL: cfg.MusicServiceURL},
+			{Name: "downloads", URL: cfg.DownloadServiceURL},
+			{Name: "recommendations", URL: cfg.RecoServiceURL},
+		},
 	})
 
 	srv := &http.Server{

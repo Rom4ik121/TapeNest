@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/tapenest/tapenest/services/api-gateway/internal/domain"
 	"github.com/tapenest/tapenest/services/api-gateway/internal/upstream"
 )
 
@@ -35,7 +36,23 @@ type Deps struct {
 	Music         *upstream.Service
 	Download      *upstream.Service
 	Streaming     *upstream.Service
-	Now           func() time.Time
+	// Admins is the live TELEGRAM id allowlist (ADMIN_TELEGRAM_IDS). Empty refuses everyone.
+	Admins map[int64]bool
+	Users  UserDirectory
+	// Probes are optional service bases (bot, music, downloads, recommendations).
+	Probes []Probe
+	Now    func() time.Time
+}
+
+// UserDirectory lists accounts for the admin mini app.
+type UserDirectory interface {
+	ListUsers(ctx context.Context, limit int) ([]domain.User, error)
+}
+
+// Probe is one service the admin health screen asks /healthz.
+type Probe struct {
+	Name string
+	URL  string
 }
 
 // NewRouter builds the HTTP handler.
@@ -45,7 +62,10 @@ func NewRouter(d Deps) http.Handler {
 	}
 	ip := clientIP(d.TrustProxy)
 	onUpstreamErr := upstreamError(d.Log)
-	h := &handlers{auth: d.Auth, download: d.Download, log: d.Log, internal: d.InternalToken, now: d.Now}
+	h := &handlers{
+		auth: d.Auth, download: d.Download, log: d.Log, internal: d.InternalToken, now: d.Now,
+		users: d.Users, probes: d.Probes, ready: d.Ready,
+	}
 
 	r := chi.NewRouter()
 	r.Use(requestIDMiddleware, loggingMiddleware(d.Log, ip), recoverMiddleware(d.Log))
@@ -75,14 +95,27 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/me", h.me)
 			// music-service (docs/api/waveplayer.openapi.yaml).
 			music := d.Music.Handler(onUpstreamErr)
-			// /search, /albums, /artists: unified catalog (library + MusicBrainz, ADR 0011);
-			// /admin/*: acquisition status, music-service checks X-User-Role=admin.
-			for _, p := range []string{"/tracks", "/tracks/*", "/playlists", "/playlists/*", "/wave/*", "/events/*", "/search", "/albums/*", "/artists/*", "/admin/*"} {
+			// /search, /albums, /artists: the existing catalog (not a new music source).
+			for _, p := range []string{"/tracks", "/tracks/*", "/playlists", "/playlists/*", "/wave/*", "/events/*", "/search", "/albums/*", "/artists/*"} {
 				r.Handle(p, music)
 			}
 			r.Handle("/downloads", d.Download.Handler(onUpstreamErr))
 			r.Handle("/downloads/*", d.Download.Handler(onUpstreamErr))
 			r.Handle("/cinema/*", d.Streaming.Handler(onUpstreamErr))
+			r.Group(func(r chi.Router) {
+				r.Use(requireAllowlist(d.Admins))
+				r.Get("/admin/session", h.adminSession)
+				r.Get("/admin/users", h.adminUsers)
+				r.Get("/admin/health", h.adminHealth)
+				r.Handle("/admin/catalog", music)
+				r.Handle("/admin/users/{id}/music", music)
+				r.Handle("/admin/downloads", d.Download.Handler(onUpstreamErr))
+				r.Handle("/admin/downloads/*", d.Download.Handler(onUpstreamErr))
+				// Existing acquisition status stays behind the same allowlist.
+				r.Handle("/admin/acquisitions", music)
+				r.Handle("/admin/acquisitions/*", music)
+				r.Handle("/admin/acquisition-status", music)
+			})
 		})
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")

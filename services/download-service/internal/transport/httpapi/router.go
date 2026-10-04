@@ -32,6 +32,8 @@ const (
 	CodeNotFound        = "NOT_FOUND"
 	CodeNotReady        = "NOT_READY"
 	CodeNoPublicURL     = "PUBLIC_LINKS_DISABLED"
+	CodeForbidden       = "FORBIDDEN"
+	CodeConflict        = "CONFLICT"
 	CodeInternal        = "INTERNAL"
 	CodeUnavailableDeps = "SERVICE_UNAVAILABLE"
 )
@@ -88,6 +90,12 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/{id}/events", h.events)
 			r.Get("/{id}/file", h.file)
 		})
+		r.Route("/api/v1/admin/downloads", func(r chi.Router) {
+			r.Use(h.requireUser, h.requireAdmin)
+			r.Get("/", h.adminList)
+			r.Post("/{id}/retry", h.adminRetry)
+			r.Delete("/{id}", h.adminRemove)
+		})
 	})
 	return r
 }
@@ -125,6 +133,16 @@ func (h *handlers) requireUser(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxUser, id)))
+	})
+}
+
+func (h *handlers) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-User-Role") != "admin" {
+			writeError(w, http.StatusForbidden, CodeForbidden, "admin role required")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

@@ -29,6 +29,7 @@ type Downloader interface {
 type MiniApps struct {
 	WavePlayer string
 	CineNest   string // optional
+	Admin      string // optional; empty hides the admin mini app
 }
 
 // Bot handles updates.
@@ -54,7 +55,16 @@ func (b *Bot) Commands(l i18n.Lang) []telegram.BotCommand {
 	if b.apps.CineNest != "" {
 		cmds = append(cmds, telegram.BotCommand{Command: "cinema", Description: b.texts.T(l, "commands.cinema")})
 	}
+	if b.apps.Admin != "" {
+		cmds = append(cmds, telegram.BotCommand{Command: "admin", Description: b.texts.T(l, "commands.admin")})
+	}
 	return cmds
+}
+
+func (b *Bot) adminKeyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{InlineKeyboard: [][]telegram.InlineKeyboardButton{{
+		{Text: b.texts.T(l, "button.admin"), WebApp: &telegram.WebAppInfo{URL: b.apps.Admin}},
+	}}}
 }
 
 func (b *Bot) cinemaKeyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
@@ -70,6 +80,11 @@ func (b *Bot) keyboard(l i18n.Lang) *telegram.InlineKeyboardMarkup {
 	if b.apps.CineNest != "" {
 		rows = append(rows, []telegram.InlineKeyboardButton{
 			{Text: b.texts.T(l, "button.cinenest"), WebApp: &telegram.WebAppInfo{URL: b.apps.CineNest}},
+		})
+	}
+	if b.apps.Admin != "" {
+		rows = append(rows, []telegram.InlineKeyboardButton{
+			{Text: b.texts.T(l, "button.admin"), WebApp: &telegram.WebAppInfo{URL: b.apps.Admin}},
 		})
 	}
 	return &telegram.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -120,6 +135,11 @@ func (b *Bot) command(ctx context.Context, m *telegram.Message, lang i18n.Lang, 
 			return b.reply(ctx, m, b.texts.T(lang, "cinema.unavailable"), false)
 		}
 		return b.send(ctx, m, b.texts.T(lang, "cinema.open"), b.cinemaKeyboard(lang))
+	case "admin":
+		if b.apps.Admin == "" {
+			return b.reply(ctx, m, b.texts.T(lang, "admin.unavailable"), false)
+		}
+		return b.send(ctx, m, b.texts.T(lang, "admin.open"), b.adminKeyboard(lang))
 	default:
 		return b.reply(ctx, m, b.texts.T(lang, "command.unknown"), false)
 	}

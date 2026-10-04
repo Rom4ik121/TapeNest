@@ -51,6 +51,16 @@ func (m *memRepo) UpsertTelegramUser(_ context.Context, p domain.TelegramProfile
 	return u, nil
 }
 
+func (m *memRepo) ListUsers(_ context.Context, _ int) ([]domain.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]domain.User, 0, len(m.byTG))
+	for _, u := range m.byTG {
+		out = append(out, u)
+	}
+	return out, nil
+}
+
 func (m *memRepo) GetByID(_ context.Context, id uuid.UUID) (domain.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -74,6 +84,9 @@ type opts struct {
 	music, download string
 	authBurst       int
 	apiBurst        int
+	roleAdmins      map[int64]bool
+	allow           map[int64]bool
+	probes          []Probe
 }
 
 func newTestEnv(t *testing.T, o opts) *testEnv {
@@ -84,7 +97,7 @@ func newTestEnv(t *testing.T, o opts) *testEnv {
 	e := &testEnv{mr: mr, repo: &memRepo{byTG: map[int64]domain.User{}}, now: time.Now()}
 	e.validator = auth.NewInitDataValidator(botToken, 24*time.Hour, nil)
 	svc := auth.NewService(e.validator, auth.NewJWTIssuer(strings.Repeat("k", 40), 15*time.Minute, nil),
-		auth.NewRefreshStore(rdb, 720*time.Hour, 15*time.Minute), e.repo, nil)
+		auth.NewRefreshStore(rdb, 720*time.Hour, 15*time.Minute), e.repo, o.roleAdmins)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mk := func(name, u string) *upstream.Service {
 		s, err := upstream.New(name, u, upstream.Options{Timeout: 2 * time.Second, FailureThreshold: 2, OpenFor: time.Minute, InternalToken: internalToken}, upstreamError(log))
@@ -111,6 +124,7 @@ func newTestEnv(t *testing.T, o opts) *testEnv {
 			"postgres": PingFunc(func(context.Context) error { return nil }),
 		},
 		Music: mk("music", o.music), Download: mk("download", o.download), Streaming: mk("streaming", ""),
+		Admins: o.allow, Users: e.repo, Probes: o.probes,
 	})
 	e.srv = httptest.NewServer(h)
 	t.Cleanup(e.srv.Close)
@@ -548,5 +562,64 @@ func TestPublicSignedStreamRoute(t *testing.T) {
 	}
 	if r := e.do(t, "POST", "/api/v1/stream/tracks/abc", nil, nil); r.status != 405 {
 		t.Fatalf("only GET/HEAD: %d", r.status)
+	}
+}
+
+func TestAdminAllowlist(t *testing.T) {
+	bot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer bot.Close()
+	e := newTestEnv(t, opts{
+		roleAdmins: map[int64]bool{9: true},
+		allow:      map[int64]bool{7: true},
+		probes:     []Probe{{Name: "bot", URL: bot.URL}, {Name: "recommendations", URL: ""}},
+	})
+	stale := e.login(t, 9) // role admin in the token, not on the live allowlist
+	denied := e.do(t, "GET", "/api/v1/admin/session", nil, bearer(stale.AccessToken))
+	if denied.status != 403 || denied.body["code"] != CodeForbidden {
+		t.Fatalf("stale admin: %d %s", denied.status, denied.raw)
+	}
+	if users := e.do(t, "GET", "/api/v1/admin/users", nil, bearer(stale.AccessToken)); users.status != 403 {
+		t.Fatalf("users must stay closed: %d %s", users.status, users.raw)
+	}
+	ok := e.login(t, 7) // not stored as admin, but the allowlist says yes
+	if ok.User.Role != domain.RoleUser {
+		t.Fatalf("login role follows the auth list, got %s", ok.User.Role)
+	}
+	session := e.do(t, "GET", "/api/v1/admin/session", nil, bearer(ok.AccessToken))
+	if session.status != 200 || session.body["role"] != "admin" {
+		t.Fatalf("session: %d %s", session.status, session.raw)
+	}
+	listed := e.do(t, "GET", "/api/v1/admin/users", nil, bearer(ok.AccessToken))
+	if listed.status != 200 {
+		t.Fatalf("users: %d %s", listed.status, listed.raw)
+	}
+	if strings.Contains(listed.raw, "photoUrl") || strings.Contains(listed.raw, "accessToken") || strings.Contains(listed.raw, "refreshToken") {
+		t.Fatalf("directory leaked a secret field: %s", listed.raw)
+	}
+	items, _ := listed.body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items: %s", listed.raw)
+	}
+	health := e.do(t, "GET", "/api/v1/admin/health", nil, bearer(ok.AccessToken))
+	if health.status != 200 {
+		t.Fatalf("health: %d %s", health.status, health.raw)
+	}
+	raw, _ := json.Marshal(health.body["services"])
+	var services []healthDTO
+	if err := json.Unmarshal(raw, &services); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, s := range services {
+		got[s.Name] = s.Status
+	}
+	if got["gateway"] != "ok" || got["bot"] != "ok" || got["recommendations"] != "off" {
+		t.Fatalf("health %+v", got)
 	}
 }
