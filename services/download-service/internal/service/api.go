@@ -198,6 +198,33 @@ func (a *API) List(ctx context.Context, userID uuid.UUID, after *repo.Cursor, li
 	return out, nil
 }
 
+// Source is the stored object of a finished download. The video editor reads
+// this key from the media bucket; it never fetches the original URL.
+type Source struct {
+	ObjectKey   string
+	Title       string
+	DurationSec int
+	Width       int
+	Height      int
+	MimeType    string
+	SizeBytes   int64
+}
+
+// SourceOf returns the object key for a finished job owned by the user.
+func (a *API) SourceOf(ctx context.Context, userID, id uuid.UUID) (Source, error) {
+	v, err := a.Get(ctx, userID, id)
+	if err != nil {
+		return Source{}, err
+	}
+	if v.Job.Status != domain.StatusDone || v.File == nil || v.File.ExpiresAt.Before(a.now()) {
+		return Source{}, ErrNotReady
+	}
+	return Source{
+		ObjectKey: v.File.ObjectKey, Title: v.File.Title, DurationSec: v.File.DurationSec,
+		Width: v.File.Width, Height: v.File.Height, MimeType: v.File.MimeType, SizeBytes: v.File.SizeBytes,
+	}, nil
+}
+
 // FileURL returns a presigned public link (TTL ≤ 1 h) to the job's file.
 func (a *API) FileURL(ctx context.Context, userID, id uuid.UUID) (string, error) {
 	v, err := a.Get(ctx, userID, id)

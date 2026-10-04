@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: TapeNest video editor
+  version: 0.1.0
+  description: |
+    Edits a file the user already downloaded. Reachable only through api-gateway
+    (`/api/v1/video/*`), which adds `X-Internal-Token` and `X-User-Id`.
+servers:
+  - url: /api/v1
+paths:
+  /video/projects:
+    post:
+      operationId: openVideoProject
+      summary: Find or create the edit for a finished download
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceJobId]
+              properties:
+                sourceJobId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "409":
+          description: Download is not finished
+  /video/projects/{id}:
+    get:
+      operationId: getVideoProject
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+    put:
+      operationId: saveVideoRecipe
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipe]
+              properties:
+                recipe: { $ref: "#/components/schemas/Recipe" }
+      responses:
+        "200":
+          description: Saved project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "409":
+          description: An export is already running
+  /video/projects/{id}/music:
+    post:
+      operationId: attachMusic
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200": { description: Music attached }
+    delete:
+      operationId: clearMusic
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204": { description: Music removed }
+  /video/projects/{id}/exports:
+    post:
+      operationId: startVideoExport
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "202":
+          description: Export queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Export" }
+  /video/exports/{id}:
+    get:
+      operationId: getVideoExport
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Export status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Export" }
+  /video/exports/{id}/events:
+    get:
+      operationId: videoExportEvents
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Server-sent events (`event: export`)
+  /video/exports/{id}/file:
+    get:
+      operationId: videoExportFile
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: redirect
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: JSON url when redirect=false }
+        "302": { description: Presigned file }
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Crop:
+      type: object
+      properties:
+        x: { type: number }
+        y: { type: number }
+        w: { type: number }
+        h: { type: number }
+    Clip:
+      type: object
+      properties:
+        startSec: { type: number }
+        endSec: { type: number }
+        speed: { type: number }
+        volume: { type: number }
+        crop: { $ref: "#/components/schemas/Crop" }
+        rotate: { type: integer, enum: [0, 90, 180, 270] }
+        transition: { type: string }
+        transitionSec: { type: number }
+    Text:
+      type: object
+      properties:
+        text: { type: string }
+        startSec: { type: number }
+        endSec: { type: number }
+        x: { type: number }
+        y: { type: number }
+        size: { type: integer }
+        color: { type: string }
+    Recipe:
+      type: object
+      properties:
+        clips:
+          type: array
+          items: { $ref: "#/components/schemas/Clip" }
+        texts:
+          type: array
+          items: { $ref: "#/components/schemas/Text" }
+        musicVolume: { type: number }
+        muteSource: { type: boolean }
+    Export:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, done, failed] }
+        error: { type: string }
+        createdAt: { type: string, format: date-time }
+    Project:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sourceJobId: { type: string, format: uuid }
+        title: { type: string }
+        durationSec: { type: number }
+        width: { type: integer }
+        height: { type: integer }
+        recipe: { $ref: "#/components/schemas/Recipe" }
+        hasMusic: { type: boolean }
+        export: { $ref: "#/components/schemas/Export" }

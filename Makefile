@@ -5,7 +5,7 @@ COMPOSE_FILE := deploy/docker-compose.dev.yml
 DC := $(COMPOSE) --env-file $(if $(wildcard .env),.env,.env.example) -f $(COMPOSE_FILE)
 FE := apps/waveplayer
 # every mini app gets lint/typecheck/test/build (FE_APPS=apps/cinenest make fe-test for one)
-FE_APPS ?= apps/waveplayer apps/cinenest
+FE_APPS ?= apps/waveplayer apps/cinenest apps/mediahub
 FE_EACH = @for a in $(FE_APPS); do echo "==> $$a"; (cd $$a && $(1)) || exit 1; done
 GO_MODULES := $(shell find services tools -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 GO_SERVICES := $(shell find services -name go.mod -exec dirname {} \; 2>/dev/null)
@@ -16,7 +16,7 @@ ENV_EXPORT := $(if $(wildcard .env),set -a; . ./.env; set +a;,)
 
 .DEFAULT_GOAL := help
 .PHONY: help dev infra-up infra-up-all infra-down infra-logs infra-ps compose-config app-up \
-        infra-native infra-native-down music-seed e2e-music e2e-reco e2e-acquisition e2e-ytm arr-up arr-down reco-eval fe-install fe-dev cn-dev fe-lint fe-typecheck fe-test fe-build \
+        infra-native infra-native-down music-seed e2e-music e2e-reco e2e-acquisition e2e-ytm arr-up arr-down reco-eval fe-install fe-dev cn-dev mh-dev fe-lint fe-typecheck fe-test fe-build \
         go-lint go-test go-build sqlc migrate openapi hadolint lint test build proto initdata \
         miniapp-up miniapp-down stack-status clean
 
@@ -57,6 +57,8 @@ fe-dev: ## WavePlayer dev server on :5173
 	cd $(FE) && npm run dev
 cn-dev: ## CineNest dev server on :5174 (base /cinenest/, cinema mocks on)
 	cd apps/cinenest && npm run dev
+mh-dev: ## MediaHub («Мои видео») dev server on :5175 (base /mediahub/)
+	cd apps/mediahub && npm run dev
 fe-lint: ## ESLint (0 warnings), all mini apps
 	$(call FE_EACH,npm run lint)
 fe-typecheck: ## tsc --noEmit (strict), all mini apps

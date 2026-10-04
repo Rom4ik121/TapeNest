@@ -17,3 +17,4 @@ Only decisions **not** fixed in `AI_DEVELOPMENT_INSTRUCTION.md` §3.1 (spec §13
 | [0011](0011-acquisition-service.md) | acquisition-service: invisible legal acquisition behind WavePlayer search | Accepted |
 | [0012](0012-youtube-music-primary.md) | YouTube Music is the primary catalog; torrents are the fallback | Accepted |
 | [0013](0013-cinenest-streaming-service.md) | CineNest streaming-service: fictional catalog, generated HLS preview, TorrServer only when a magnet is already stored | Accepted |
+| [0014](0014-video-and-photo-editors.md) | Video editor and photo editor are separate services; «Мои видео» mini app | Accepted |

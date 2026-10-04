@@ -44,6 +44,8 @@ type Config struct {
 	MusicServiceURL     string        `env:"MUSIC_SERVICE_URL"`
 	DownloadServiceURL  string        `env:"DOWNLOAD_SERVICE_URL"`
 	StreamingServiceURL string        `env:"STREAMING_SERVICE_URL"`
+	VideoEditorURL      string        `env:"VIDEO_EDITOR_URL"`
+	PhotoEditorURL      string        `env:"PHOTO_EDITOR_URL"`
 	UpstreamTimeout     time.Duration `env:"UPSTREAM_TIMEOUT" env-default:"10s"`
 }
 

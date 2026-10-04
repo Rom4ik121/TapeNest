@@ -74,6 +74,10 @@ func notImplementedMessage(service string) string {
 		return "music backend is not deployed yet (planned for stage 3)"
 	case "streaming":
 		return "streaming backend is not deployed yet (planned for stage 4)"
+	case "video":
+		return "video editor is not deployed in this environment (set VIDEO_EDITOR_URL)"
+	case "photo":
+		return "photo editor is not deployed in this environment (set PHOTO_EDITOR_URL)"
 	default:
 		return "service is not deployed"
 	}

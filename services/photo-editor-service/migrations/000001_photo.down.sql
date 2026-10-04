@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS photo.exports;
+DROP TABLE IF EXISTS photo.photos;
+DROP SCHEMA IF EXISTS photo;

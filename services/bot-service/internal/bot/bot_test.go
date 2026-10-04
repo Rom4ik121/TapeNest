@@ -257,6 +257,10 @@ func TestCinemaCommand(t *testing.T) {
 	if cmds := b.Commands(i18n.RU); len(cmds) != 3 || cmds[2].Command != "cinema" || cmds[2].Description == "" {
 		t.Fatal(cmds)
 	}
+	bHub, _, _ := newBot(t, MiniApps{WavePlayer: waveURL, CineNest: "https://x.example/cinenest/", MediaHub: "https://x.example/mediahub/"})
+	if cmds := bHub.Commands(i18n.EN); len(cmds) != 4 || cmds[3].Command != "videos" {
+		t.Fatal(cmds)
+	}
 	for _, text := range []string{"/cinema", "/cinenest@tapenest_bot"} {
 		s.sent = nil
 		if err := b.Handle(ctx, msg(text, "en"), "r"); err != nil {
@@ -276,5 +280,26 @@ func TestCinemaCommand(t *testing.T) {
 	_ = b2.Handle(ctx, msg("/cinema", "ru"), "r")
 	if len(s2.sent) != 1 || s2.sent[0].ReplyMarkup != nil || !strings.Contains(s2.sent[0].Text, "не подключён") {
 		t.Fatalf("%+v", s2.sent)
+	}
+}
+
+func TestVideosCommand(t *testing.T) {
+	ctx := context.Background()
+	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, MediaHub: "https://x.example/mediahub/"})
+	if err := b.Handle(ctx, msg("/videos", "ru"), "r"); err != nil {
+		t.Fatal(err)
+	}
+	m := s.sent[0]
+	if !strings.Contains(m.Text, "Мои видео") || m.ReplyMarkup == nil || m.ReplyMarkup.InlineKeyboard[0][0].WebApp.URL != "https://x.example/mediahub/" {
+		t.Fatalf("%+v", m)
+	}
+	kb := b.keyboard(i18n.RU).InlineKeyboard
+	if len(kb) != 2 || kb[0][0].WebApp.URL != waveURL || kb[1][0].Text == "" {
+		t.Fatalf("keyboard %+v", kb)
+	}
+	b2, s2, _ := newBot(t, MiniApps{WavePlayer: waveURL})
+	_ = b2.Handle(ctx, msg("/videos", "en"), "r")
+	if s2.sent[0].ReplyMarkup != nil || !strings.Contains(s2.sent[0].Text, "isn't connected") {
+		t.Fatalf("%+v", s2.sent[0])
 	}
 }

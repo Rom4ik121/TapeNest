@@ -110,12 +110,16 @@ services:
       DOWNLOAD_SERVICE_URL: http://download-service:8082
       MUSIC_SERVICE_URL: http://music-service:8084
       STREAMING_SERVICE_URL: http://streaming-service:8094
+      VIDEO_EDITOR_URL: http://video-editor-service:8096
+      PHOTO_EDITOR_URL: http://photo-editor-service:8098
     ports:
       - "127.0.0.1:${API_GATEWAY_PORT:-8080}:8080"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       streaming-service: { condition: service_started }
+      video-editor-service: { condition: service_started }
+      photo-editor-service: { condition: service_started }
 
   bot-service:
     <<: *restart
@@ -363,6 +367,64 @@ services:
       MIGRATE_ON_START: "false"
     depends_on:
       streaming-service: { condition: service_started }
+
+  # ── video editor (API :8096 + worker health :8097) and photo editor (:8098) ─
+  video-editor-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/video-editor-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment: &video-editor-env
+      VIDEO_EDITOR_PORT: "8096"
+      VIDEO_EDITOR_WORKER_PORT: "8097"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      DOWNLOAD_SERVICE_URL: http://download-service:8082
+      S3_ENDPOINT: minio:9000
+      S3_BUCKET_MEDIA: media
+      S3_BUCKET_EDITS: video-edits
+      MIGRATE_ON_START: "true"
+    ports:
+      - "127.0.0.1:${VIDEO_EDITOR_PORT:-8096}:8096"
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_started }
+      download-service: { condition: service_started }
+
+  video-editor-worker:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/video-editor-service
+    entrypoint: []
+    command: ["video-editor-worker"]
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      <<: *video-editor-env
+      MIGRATE_ON_START: "false"
+    depends_on:
+      video-editor-service: { condition: service_started }
+
+  photo-editor-service:
+    <<: *restart
+    profiles: ["app"]
+    build: ../services/photo-editor-service
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      PHOTO_EDITOR_PORT: "8098"
+      DATABASE_URL: postgres://${POSTGRES_USER:-tapenest}:${POSTGRES_PASSWORD:-tapenest_dev}@postgres:5432/${POSTGRES_DB:-tapenest}?sslmode=disable
+      S3_ENDPOINT: minio:9000
+      S3_BUCKET_PHOTOS: photos
+      MIGRATE_ON_START: "true"
+    ports:
+      - "127.0.0.1:${PHOTO_EDITOR_PORT:-8098}:8098"
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_started }
 
   # ── edge (profile): /api → api-gateway, /hls → streaming, / → Vite ──────
   nginx:

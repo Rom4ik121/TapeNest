@@ -35,6 +35,8 @@ type Deps struct {
 	Music         *upstream.Service
 	Download      *upstream.Service
 	Streaming     *upstream.Service
+	Video         *upstream.Service
+	Photo         *upstream.Service
 	Now           func() time.Time
 }
 
@@ -83,6 +85,12 @@ func NewRouter(d Deps) http.Handler {
 			r.Handle("/downloads", d.Download.Handler(onUpstreamErr))
 			r.Handle("/downloads/*", d.Download.Handler(onUpstreamErr))
 			r.Handle("/cinema/*", d.Streaming.Handler(onUpstreamErr))
+			video := proxyOr501(d.Video, "video", onUpstreamErr)
+			r.Handle("/video", video)
+			r.Handle("/video/*", video)
+			photo := proxyOr501(d.Photo, "photo", onUpstreamErr)
+			r.Handle("/photos", photo)
+			r.Handle("/photos/*", photo)
 		})
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "not found")
@@ -102,6 +110,20 @@ func NewRouter(d Deps) http.Handler {
 		writeError(w, http.StatusMethodNotAllowed, CodeInvalid, "method not allowed")
 	})
 	return r
+}
+
+// proxyOr501 proxies a configured upstream. A nil service answers 501.
+func proxyOr501(s *upstream.Service, name string, onError upstream.ErrorWriter) http.Handler {
+	if s == nil {
+		empty, err := upstream.New(name, "", upstream.Options{}, onError)
+		if err != nil {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				onError(w, r, name, upstream.ErrNotConfigured)
+			})
+		}
+		s = empty
+	}
+	return s.Handler(onError)
 }
 
 // stripIdentity drops client-supplied identity headers on unauthenticated
