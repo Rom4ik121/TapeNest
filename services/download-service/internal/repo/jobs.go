@@ -180,6 +180,62 @@ func (s *Store) FinishDone(ctx context.Context, id, mediaID uuid.UUID, title str
 	return toJob(r), nil
 }
 
+// ListJobs returns jobs of every user, newest first. An empty status returns all statuses,
+// including jobs the owner-scoped list hides from other people.
+func (s *Store) ListJobs(ctx context.Context, status string, after *Cursor, limit int) ([]domain.Job, error) {
+	p := db.ListJobsAdminParams{Lim: int32(limit)} //nolint:gosec // limit is clamped by the caller
+	if status != "" {
+		p.Status = &status
+	}
+	if after != nil {
+		p.BeforeCreated, p.BeforeID = &after.CreatedAt, &after.ID
+	}
+	rows, err := s.q.ListJobsAdmin(ctx, p)
+	if err != nil {
+		return nil, wrap("list jobs", err)
+	}
+	out := make([]domain.Job, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toJob(r))
+	}
+	return out, nil
+}
+
+// RetryFailed moves a failed job back to the queue and clears the attempt counter.
+func (s *Store) RetryFailed(ctx context.Context, id uuid.UUID) (domain.Job, error) {
+	r, err := s.q.RetryFailedJob(ctx, id)
+	if err != nil {
+		return domain.Job{}, wrap("retry failed", err)
+	}
+	return toJob(r), nil
+}
+
+// DeleteDoneJob removes a finished job from its owner's library.
+func (s *Store) DeleteDoneJob(ctx context.Context, id uuid.UUID) (domain.Job, error) {
+	r, err := s.q.DeleteDoneJob(ctx, id)
+	if err != nil {
+		return domain.Job{}, wrap("delete done job", err)
+	}
+	return toJob(r), nil
+}
+
+// CountMediaJobs counts jobs that still point at a stored file.
+func (s *Store) CountMediaJobs(ctx context.Context, mediaID uuid.UUID) (int, error) {
+	n, err := s.q.CountMediaJobs(ctx, &mediaID)
+	if err != nil {
+		return 0, wrap("count media jobs", err)
+	}
+	return int(n), nil
+}
+
+// DeleteMedia removes a stored-file row.
+func (s *Store) DeleteMedia(ctx context.Context, id uuid.UUID) error {
+	if err := s.q.DeleteMedia(ctx, id); err != nil {
+		return wrap("delete media", err)
+	}
+	return nil
+}
+
 // FinishFailed marks the job failed.
 func (s *Store) FinishFailed(ctx context.Context, id uuid.UUID, kind domain.ErrorKind, msg string) (domain.Job, error) {
 	r, err := s.q.FinishFailed(ctx, db.FinishFailedParams{ID: id, ErrorKind: string(kind), ErrorMessage: msg})

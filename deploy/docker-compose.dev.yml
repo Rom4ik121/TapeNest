@@ -110,6 +110,8 @@ services:
       DOWNLOAD_SERVICE_URL: http://download-service:8082
       MUSIC_SERVICE_URL: http://music-service:8084
       STREAMING_SERVICE_URL: http://streaming-service:8094
+      BOT_SERVICE_URL: http://bot-service:8081
+      RECO_SERVICE_URL: http://reco-service:8086
     ports:
       - "127.0.0.1:${API_GATEWAY_PORT:-8080}:8080"
     depends_on:

@@ -90,6 +90,9 @@ type handlers struct {
 	log      *slog.Logger
 	internal string
 	now      func() time.Time
+	users    UserDirectory
+	probes   []Probe
+	ready    map[string]Pinger
 }
 
 type telegramLoginReq struct {

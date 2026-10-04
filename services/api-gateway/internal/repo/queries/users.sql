@@ -22,3 +22,10 @@ SELECT * FROM gateway.users WHERE id = $1;
 
 -- name: GetUserByTelegramID :one
 SELECT * FROM gateway.users WHERE telegram_id = $1;
+
+-- name: ListUsers :many
+-- Admin directory. No secrets: profile columns only (no tokens live in this table).
+SELECT id, telegram_id, first_name, last_name, username, language_code, role, created_at, last_login_at
+FROM gateway.users
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(lim);

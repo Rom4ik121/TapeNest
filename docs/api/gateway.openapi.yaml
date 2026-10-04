@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: TapeNest api-gateway
-  version: 1.2.0
+  version: 1.3.0
   description: |
     Public edge of TapeNest (stage 1): Telegram auth (initData → JWT), rate limiting,
     routing to internal services. Music/playlist/wave endpoints are specified in
@@ -125,6 +125,51 @@ paths:
         '429': { $ref: '#/components/responses/Error' }
         '501': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/session:
+    get:
+      summary: Admin mini app session
+      description: |
+        Allowed only when the caller's Telegram id is in `ADMIN_TELEGRAM_IDS`.
+        An empty allowlist refuses everyone, including a JWT that still says `role=admin`.
+        A hit answers `{telegramId, role: admin}` and upstream admin proxies receive `X-User-Role: admin`.
+      responses:
+        '200': { description: allowlisted admin }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { description: not on the allowlist, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/admin/users:
+    get:
+      summary: Accounts for the admin mini app
+      description: |
+        Names, Telegram id, role and login time. Photo URLs and tokens are not included.
+        Listening preferences are `GET /api/v1/admin/users/{id}/music` on music-service.
+      responses:
+        '200': { description: '{items: AdminUser[]}' }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/health:
+    get:
+      summary: Health of the services this product actually runs
+      description: |
+        `{services: [{name, status}]}` where status is `ok`, `down` or `off`.
+        Names: gateway (local postgres+redis), bot (`BOT_SERVICE_URL`), music (`MUSIC_SERVICE_URL`),
+        downloads (`DOWNLOAD_SERVICE_URL`), recommendations (`RECO_SERVICE_URL`).
+        An empty base URL is `off`, not down.
+      responses:
+        '200': { description: service list }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/catalog:
+    get:
+      summary: Proxied catalog health on music-service (existing catalog, not a new source)
+      responses:
+        '200': { description: artist/album/track counts }
+        '403': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/downloads:
+    get:
+      summary: Proxied global download list (download.openapi.yaml), including jobs hidden from their owners
+      responses:
+        '200': { description: jobs }
+        '403': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/Error' }
   /internal/v1/bot/downloads:
     post:
       summary: 'Service-to-service: bot-service forwards a detected link (never exposed publicly)'

@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * TapeNest palette: cream #E7E4DE · amber #EEAA11 · teal #4FB3B3 ·
+ * magenta #BB3381 · plum #3F1D50 · ink #16141C.
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --c-bg: 231 228 222;
+  --c-surface: 244 242 238;
+  --c-surface-2: 219 214 206;
+  --c-fg: 22 20 28;
+  --c-muted: 88 80 98;
+  --c-line: 22 20 28;
+  --c-accent: 187 51 129;
+  --c-accent-fg: 255 255 255;
+  --c-highlight: 238 170 17;
+  --c-danger: 176 36 52;
+  --c-danger-fg: 255 255 255;
+  --line-alpha: 0.12;
+  --hero: linear-gradient(160deg, #eeaa11 0%, #bb3381 42%, #3f1d50 100%);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --c-bg: 22 20 28;
+  --c-surface: 34 29 43;
+  --c-surface-2: 50 38 64;
+  --c-fg: 231 228 222;
+  --c-muted: 168 159 181;
+  --c-line: 231 228 222;
+  --c-accent: 238 170 17;
+  --c-accent-fg: 22 20 28;
+  --c-highlight: 187 51 129;
+  --c-danger: 255 107 122;
+  --c-danger-fg: 22 20 28;
+  --line-alpha: 0.12;
+  --hero: linear-gradient(160deg, #bb3381 0%, #3f1d50 55%, #16141c 100%);
+}
+
+:root {
+  --app-height: var(--tg-viewport-stable-height, 100dvh);
+  --app-safe-top: calc(
+    var(--tg-viewport-safe-area-inset-top, env(safe-area-inset-top, 0px)) +
+      var(--tg-viewport-content-safe-area-inset-top, 0px)
+  );
+  --app-safe-bottom: max(
+    var(--tg-viewport-safe-area-inset-bottom, 0px),
+    var(--tg-viewport-content-safe-area-inset-bottom, 0px),
+    env(safe-area-inset-bottom, 0px)
+  );
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: rgb(var(--c-bg));
+  color: rgb(var(--c-fg));
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+}
+
+#root {
+  min-height: var(--app-height);
+}

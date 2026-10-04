@@ -240,8 +240,90 @@ func (s *MemStore) UpsertMedia(_ context.Context, m domain.Media) (domain.Media,
 	return m, nil
 }
 
+// ListJobs implements the port.
+func (s *MemStore) ListJobs(_ context.Context, status string, after *repo.Cursor, limit int) ([]domain.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.err("ListJobs"); err != nil {
+		return nil, err
+	}
+	var out []domain.Job
+	for _, j := range s.Jobs {
+		if status != "" && string(j.Status) != status {
+			continue
+		}
+		if after != nil && !j.CreatedAt.Before(after.CreatedAt) {
+			continue
+		}
+		out = append(out, j)
+	}
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].CreatedAt.Equal(out[b].CreatedAt) {
+			return out[a].ID.String() > out[b].ID.String()
+		}
+		return out[a].CreatedAt.After(out[b].CreatedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// RetryFailed implements the port.
+func (s *MemStore) RetryFailed(_ context.Context, id uuid.UUID) (domain.Job, error) {
+	return s.update(id, "RetryFailed", func(j *domain.Job) bool {
+		if j.Status != domain.StatusFailed {
+			return false
+		}
+		j.Status, j.Stage, j.Priority = domain.StatusQueued, "", domain.PriorityLow
+		j.ErrorKind, j.ErrorMessage, j.Attempts, j.FinishedAt = "", "", 0, nil
+		return true
+	})
+}
+
+// DeleteDoneJob implements the port.
+func (s *MemStore) DeleteDoneJob(_ context.Context, id uuid.UUID) (domain.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.err("DeleteDoneJob"); err != nil {
+		return domain.Job{}, err
+	}
+	j, ok := s.Jobs[id]
+	if !ok || j.Status != domain.StatusDone {
+		return domain.Job{}, repo.ErrNotFound
+	}
+	delete(s.Jobs, id)
+	return j, nil
+}
+
+// CountMediaJobs implements the port.
+func (s *MemStore) CountMediaJobs(_ context.Context, mediaID uuid.UUID) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.err("CountMediaJobs"); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, j := range s.Jobs {
+		if j.MediaID != nil && *j.MediaID == mediaID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// DeleteMedia implements the port.
+func (s *MemStore) DeleteMedia(_ context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.err("DeleteMedia"); err != nil {
+		return err
+	}
+	delete(s.Media, id)
+	return nil
+}
+
 // Job returns a job snapshot.
-// Job implements the port.
 func (s *MemStore) Job(id uuid.UUID) domain.Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -298,4 +380,12 @@ func (f *MemFiles) PresignPublic(_ context.Context, key, _ string, _ time.Durati
 		return "", nil
 	}
 	return "https://app.example/media/" + key + "?sig=y", nil
+}
+
+// Remove implements the port.
+func (f *MemFiles) Remove(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.Objects, key)
+	return nil
 }

@@ -23,6 +23,8 @@ var (
 	ErrForbiddenHost = errors.New("host is not allowed")
 	ErrNotReady      = errors.New("download is not finished")
 	ErrNoPublicURL   = errors.New("public file links are not configured")
+	ErrNotFailed     = errors.New("only a failed download can be retried")
+	ErrNotDone       = errors.New("only a finished download can be removed")
 	ErrNotFound      = repo.ErrNotFound
 )
 
@@ -215,4 +217,90 @@ func (a *API) FileURL(ctx context.Context, userID, id uuid.UUID) (string, error)
 		return "", ErrNoPublicURL
 	}
 	return u, nil
+}
+
+// AdminList returns jobs of every user. status empty means all statuses.
+func (a *API) AdminList(ctx context.Context, status string, after *repo.Cursor, limit int) ([]View, error) {
+	jobs, err := a.store.ListJobs(ctx, status, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]View, 0, len(jobs))
+	for _, j := range jobs {
+		v, err := a.view(ctx, j)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// Retry puts a failed job back on the queue. A job that is not failed is rejected.
+func (a *API) Retry(ctx context.Context, id uuid.UUID) (domain.Job, error) {
+	j, err := a.store.RetryFailed(ctx, id)
+	if errors.Is(err, repo.ErrNotFound) {
+		existing, gerr := a.store.GetJob(ctx, id)
+		if gerr != nil {
+			return domain.Job{}, gerr
+		}
+		if existing.Status != domain.StatusFailed {
+			return domain.Job{}, ErrNotFailed
+		}
+		return domain.Job{}, err
+	}
+	if err != nil {
+		return domain.Job{}, err
+	}
+	if err := a.queue.Enqueue(ctx, j.ID, domain.PriorityLow); err != nil {
+		_, _ = a.store.FinishFailed(ctx, j.ID, domain.KindInternal, "queue unavailable")
+		return domain.Job{}, fmt.Errorf("enqueue: %w", err)
+	}
+	return j, nil
+}
+
+// RemoveFromLibrary deletes a finished job from that user's library.
+// The stored file is removed only when no other job still references it.
+func (a *API) RemoveFromLibrary(ctx context.Context, id uuid.UUID) error {
+	j, err := a.store.DeleteDoneJob(ctx, id)
+	if errors.Is(err, repo.ErrNotFound) {
+		existing, gerr := a.store.GetJob(ctx, id)
+		if gerr != nil {
+			return gerr
+		}
+		if existing.Status != domain.StatusDone {
+			return ErrNotDone
+		}
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if j.MediaID == nil {
+		return nil
+	}
+	n, err := a.store.CountMediaJobs(ctx, *j.MediaID)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	m, err := a.store.GetMedia(ctx, *j.MediaID)
+	if errors.Is(err, repo.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := a.store.DeleteMedia(ctx, m.ID); err != nil {
+		return err
+	}
+	if err := a.files.Remove(ctx, m.ObjectKey); err != nil {
+		a.log.WarnContext(ctx, "remove object failed", "key", m.ObjectKey, "err", err)
+	}
+	if err := a.bus.ForgetMedia(ctx, m.URLHash); err != nil {
+		a.log.WarnContext(ctx, "forget media cache failed", "err", err)
+	}
+	return nil
 }

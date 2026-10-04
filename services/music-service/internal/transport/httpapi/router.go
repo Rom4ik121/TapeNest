@@ -50,6 +50,7 @@ type Deps struct {
 	Events        *service.Events
 	Streamer      *service.Streamer
 	Discovery     *service.Discovery
+	Admin         *service.Admin
 	Internal      *service.Internal // nil disables /internal/v1/*
 	InternalToken string
 	Log           *slog.Logger
@@ -91,6 +92,11 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(requireUser)
 			r.Get("/api/v1/tracks/search", h.search)
+			r.Group(func(r chi.Router) {
+				r.Use(h.requireAdmin)
+				r.Get("/api/v1/admin/catalog", h.adminCatalog)
+				r.Get("/api/v1/admin/users/{id}/music", h.adminUserMusic)
+			})
 			if d.Discovery != nil {
 				r.Get("/api/v1/search", h.searchAll)
 				r.Get("/api/v1/albums/{id}", h.getAlbum)

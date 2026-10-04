@@ -278,3 +278,51 @@ func TestCinemaCommand(t *testing.T) {
 		t.Fatalf("%+v", s2.sent)
 	}
 }
+
+func TestAdminCommandOptional(t *testing.T) {
+	ctx := context.Background()
+	const adminURL = "https://x.example/admin/"
+	b, s, _ := newBot(t, MiniApps{WavePlayer: waveURL, Admin: adminURL})
+	cmds := b.Commands(i18n.RU)
+	if len(cmds) != 3 || cmds[2].Command != "admin" {
+		t.Fatal(cmds)
+	}
+	if err := b.Handle(ctx, msg("/start", "ru"), "r"); err != nil {
+		t.Fatal(err)
+	}
+	kb := s.sent[0].ReplyMarkup.InlineKeyboard
+	if len(kb) != 2 || kb[0][0].WebApp.URL != waveURL || kb[1][0].WebApp.URL != adminURL {
+		t.Fatalf("keyboard %+v", kb)
+	}
+	s.sent = nil
+	if err := b.Handle(ctx, msg("/admin", "ru"), "r"); err != nil {
+		t.Fatal(err)
+	}
+	if s.sent[0].ReplyMarkup.InlineKeyboard[0][0].WebApp.URL != adminURL {
+		t.Fatal(s.sent[0])
+	}
+	f := &fakeSetup{}
+	if err := b.Setup(ctx, f, SetupConfig{WebhookURL: "https://x.example/tg/webhook", WebhookSecret: "s3cr3t", MenuText: "WavePlayer"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.menu.WebApp.URL != waveURL || f.menu.Text != "WavePlayer" {
+		t.Fatalf("menu button must stay the music player: %+v", f.menu)
+	}
+
+	off, s2, _ := newBot(t, MiniApps{WavePlayer: waveURL})
+	if cmds := off.Commands(i18n.EN); len(cmds) != 2 {
+		t.Fatal(cmds)
+	}
+	if err := off.Handle(ctx, msg("/admin", "ru"), "r"); err != nil {
+		t.Fatal(err)
+	}
+	if s2.sent[0].ReplyMarkup != nil || !strings.Contains(s2.sent[0].Text, "не подключена") {
+		t.Fatalf("%+v", s2.sent[0])
+	}
+	if err := off.Handle(ctx, msg("/start", "ru"), "r"); err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.sent[1].ReplyMarkup.InlineKeyboard) != 1 {
+		t.Fatal(s2.sent[1].ReplyMarkup)
+	}
+}

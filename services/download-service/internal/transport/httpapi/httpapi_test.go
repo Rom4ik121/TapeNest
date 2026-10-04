@@ -313,3 +313,72 @@ func TestSSE(t *testing.T) {
 		t.Fatal(r.StatusCode)
 	}
 }
+
+func TestAdminDownloads(t *testing.T) {
+	f := setup(t)
+	owner := uuid.New()
+	other := uuid.New()
+	mediaID := uuid.New()
+	now := time.Now()
+	failed := domain.Job{
+		ID: uuid.New(), UserID: owner, URL: "https://youtu.be/hidden-fail", Normalized: "https://youtu.be/hidden-fail",
+		Status: domain.StatusFailed, Source: domain.SourceYouTube, ErrorKind: domain.KindNetwork, ErrorMessage: "timeout",
+		CreatedAt: now, Attempts: 4,
+	}
+	done := domain.Job{
+		ID: uuid.New(), UserID: other, URL: "https://youtu.be/hidden-done", Normalized: "https://youtu.be/hidden-done",
+		Status: domain.StatusDone, Source: domain.SourceYouTube, MediaID: &mediaID, Title: "Clip",
+		CreatedAt: now.Add(-time.Minute),
+	}
+	f.store.Jobs[failed.ID] = failed
+	f.store.Jobs[done.ID] = done
+	f.store.Media[mediaID] = domain.Media{ID: mediaID, ObjectKey: "obj", URLHash: "hash", Title: "Clip", ExpiresAt: now.Add(time.Hour)}
+	f.files.Objects["obj"] = []byte("file")
+
+	admin := map[string]string{"X-User-Role": "admin"}
+	if r, b := f.do(t, "GET", "/api/v1/admin/downloads/", "", map[string]string{"X-User-Role": "user"}); r.StatusCode != 403 || b["code"] != CodeForbidden {
+		t.Fatalf("non-admin: %d %v", r.StatusCode, b)
+	}
+	// The caller's own list does not include the other person's finished file.
+	if r, b := f.do(t, "GET", "/api/v1/downloads/", "", nil); r.StatusCode != 200 || len(b["items"].([]any)) != 0 {
+		t.Fatalf("owner list: %d %v", r.StatusCode, b)
+	}
+	r, b := f.do(t, "GET", "/api/v1/admin/downloads/?status=failed", "", admin)
+	items, _ := b["items"].([]any)
+	if r.StatusCode != 200 || len(items) != 1 || items[0].(map[string]any)["userId"] != owner.String() {
+		t.Fatalf("failed page: %d %v", r.StatusCode, b)
+	}
+	if strings.Contains(fmtJSON(b), "objectKey") || strings.Contains(fmtJSON(b), "obj") {
+		t.Fatalf("object key leaked: %v", b)
+	}
+	r, b = f.do(t, "GET", "/api/v1/admin/downloads/", "", admin)
+	if r.StatusCode != 200 || len(b["items"].([]any)) != 2 {
+		t.Fatalf("all jobs, including ones hidden from each user: %d %v", r.StatusCode, b)
+	}
+	if r, b := f.do(t, "POST", "/api/v1/admin/downloads/"+done.ID.String()+"/retry", "", admin); r.StatusCode != 409 {
+		t.Fatalf("retry finished: %d %v", r.StatusCode, b)
+	}
+	if r, b := f.do(t, "POST", "/api/v1/admin/downloads/"+failed.ID.String()+"/retry", "", admin); r.StatusCode != 200 || b["status"] != "queued" {
+		t.Fatalf("retry: %d %v", r.StatusCode, b)
+	}
+	if got := f.store.Job(failed.ID); got.Status != domain.StatusQueued || got.Attempts != 0 {
+		t.Fatalf("requeued: %+v", got)
+	}
+	if r, _ := f.do(t, "DELETE", "/api/v1/admin/downloads/"+failed.ID.String(), "", admin); r.StatusCode != 409 {
+		t.Fatalf("remove queued: %d", r.StatusCode)
+	}
+	if r, _ := f.do(t, "DELETE", "/api/v1/admin/downloads/"+done.ID.String(), "", admin); r.StatusCode != 204 {
+		t.Fatalf("remove: %d", r.StatusCode)
+	}
+	if _, ok := f.store.Jobs[done.ID]; ok {
+		t.Fatal("finished job still in the library")
+	}
+	if _, ok := f.files.Objects["obj"]; ok {
+		t.Fatal("unreferenced file was kept")
+	}
+}
+
+func fmtJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}

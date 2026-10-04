@@ -110,6 +110,7 @@ func run(migrateOnly bool) error {
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Library:       library,
+		Admin:         service.NewAdmin(infra.Store),
 		Discovery:     discovery,
 		Wave:          wave,
 		Internal:      service.NewInternal(infra.Store),
